@@ -1,14 +1,18 @@
 {
   "name": "discord-bot",
   "version": "1.0.0",
+  "description": "A Gen Z Discord bot",
   "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js"
+  },
   "dependencies": {
-    "discord.js": "^14.0.3",
+    "discord.js": "^14.7.1",
     "axios": "^1.6.1",
     "express": "^4.18.2",
     "sqlite3": "^5.1.4"
   },
-  "scripts": {
-    "start": "node bot.js"
+  "engines": {
+    "node": ">=16.9.0"
   }
 }
