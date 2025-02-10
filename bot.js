@@ -12,8 +12,7 @@ const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent,
-        GatewayIntentBits.GuildVoiceStates
+        GatewayIntentBits.GuildMembers,  // Added to comply with Discord's new policies
     ],
     partials: [Partials.Channel]
 });
@@ -46,19 +45,9 @@ client.on('interactionCreate', async interaction => {
         chatting = false;
         interaction.reply("bruh i’m out, cya 😴");
     } else if (commandName === "join") {
-        if (member.voice.channel) {
-            const connection = await member.voice.channel.join();
-            interaction.reply("skibidi bot in da vc 🔥");
-        } else {
-            interaction.reply("bro, get in a vc first 💀");
-        }
+        interaction.reply("VC joining temporarily disabled to avoid intent issues.");
     } else if (commandName === "leave") {
-        if (guild.me.voice.channel) {
-            guild.me.voice.channel.leave();
-            interaction.reply("ight i'm out ✌️");
-        } else {
-            interaction.reply("bro i'm not even in a vc 💀");
-        }
+        interaction.reply("VC leaving temporarily disabled.");
     }
 });
 
