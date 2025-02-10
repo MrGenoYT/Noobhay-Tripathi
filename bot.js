@@ -33,21 +33,46 @@ const slangList = ["fr", "kk", "skibidi", "rizz", "gyat", "cap", "based", "bet",
 
 let chatting = false;
 
-// 🌟 Command Handling
-client.on('interactionCreate', async interaction => {
-    if (!interaction.isCommand()) return;
-    const { commandName, member, guild } = interaction;
+ const commands = [
+    { name: 'start', description: 'Start the bot’s chat mode' },
+    { name: 'stop', description: 'Stop the bot’s chat mode' },
+    { name: 'join', description: 'Join a voice channel (Disabled)' },
+    { name: 'leave', description: 'Leave a voice channel (Disabled)' }
+];
 
-    if (commandName === "start") {
-        chatting = true;
-        interaction.reply("aight bet, i'm awake now 🥶");
-    } else if (commandName === "stop") {
-        chatting = false;
-        interaction.reply("bruh i’m out, cya 😴");
-    } else if (commandName === "join") {
-        interaction.reply("VC joining temporarily disabled to avoid intent issues.");
-    } else if (commandName === "leave") {
-        interaction.reply("VC leaving temporarily disabled.");
+const rest = new REST({ version: '10' }).setToken(BOT_TOKEN);
+
+(async () => {
+    try {
+        console.log('Registering slash commands...');
+        await rest.put(
+            Routes.applicationCommands(client.user.id),
+            { body: commands }
+        );
+        console.log('Slash commands registered.');
+    } catch (error) {
+        console.error('Error registering commands:', error);
+    }
+})();
+
+client.on('interactionCreate', async interaction => {
+    if (!interaction.isChatInputCommand()) return;
+
+    switch (interaction.commandName) {
+        case 'start':
+            chatting = true;
+            await interaction.reply("aight bet, i'm awake now 🥶");
+            break;
+        case 'stop':
+            chatting = false;
+            await interaction.reply("bruh i’m out, cya 😴");
+            break;
+        case 'join':
+            await interaction.reply("VC joining temporarily disabled to avoid intent issues.");
+            break;
+        case 'leave':
+            await interaction.reply("VC leaving temporarily disabled.");
+            break;
     }
 });
 
