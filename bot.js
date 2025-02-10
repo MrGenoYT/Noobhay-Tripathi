@@ -13,7 +13,7 @@ const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.GuildMembers
+        GatewayIntentBits.MessageContent
     ],
     partials: [Partials.Channel]
 });
@@ -30,7 +30,7 @@ const db = new sqlite3.Database("./chat_memory.db", (err) => {
 });
 
 // 🌟 Gen Z Slang List
-const slangList = ["fr", "kk", "skibidi", "rizz", "gyat", "cap", "based", "bet", "vibe", "drip", "bruh", "sus", "simp", "yeet", "bussin", "no cap", "mid", "fax", "pov", "moots", "ratio", "yap", "goofy", "smh", "idk", "lmao", "goated", "fyp", "cringe", "edgelord", "stan", "deadass", "woke", "hella", "lit", "chad", "sigma", "brokie", "boomer", "npc", "touch grass", "irl", "w", "l", "nah", "sus af", "crying fr", "i can’t 💀"];
+const slangList = ["fr", "kk", "skibidi", "rizz", "gyat", "cap", "based", "bet", "bruh", "sus", "simp", "yeet", "bussin", "mid", "fax", "pov", "moots", "ratio", "goofy", "smh", "idk", "lmao", "goated", "fyp", "cringe", "woke", "hella", "lit", "chad", "sigma", "npc", "irl", "w", "l", "nah", "sus af", "crying fr", "💀"];
 
 let chatting = false;
 
@@ -38,8 +38,11 @@ let chatting = false;
 const commands = [
     new SlashCommandBuilder().setName('start').setDescription('Start the chat mode'),
     new SlashCommandBuilder().setName('stop').setDescription('Stop the chat mode'),
-    new SlashCommandBuilder().setName('join').setDescription('Join VC (currently disabled)'),
-    new SlashCommandBuilder().setName('leave').setDescription('Leave VC (currently disabled)')
+    new SlashCommandBuilder().setName('slang').setDescription('Get slang definitions')
+        .addStringOption(option => 
+            option.setName('term')
+                .setDescription('Slang word to define')
+                .setAutocomplete(true))
 ].map(command => command.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(BOT_TOKEN);
@@ -56,18 +59,23 @@ registerCommands();
 
 // 🌟 Slash & Prefix Command Handling
 client.on('interactionCreate', async interaction => {
-    if (!interaction.isCommand()) return;
-    handleCommand(interaction.commandName, interaction);
+    if (interaction.isAutocomplete()) {
+        const focusedValue = interaction.options.getFocused();
+        const filtered = slangList.filter(slang => slang.startsWith(focusedValue));
+        await interaction.respond(filtered.map(slang => ({ name: slang, value: slang })).slice(0, 5));
+    } else if (interaction.isCommand()) {
+        handleCommand(interaction.commandName, interaction);
+    }
 });
 
 client.on('messageCreate', async message => {
     if (message.author.bot) return;
 
-    const content = message.content.toLowerCase();
-    if (content.startsWith("!")) {
-        const args = content.slice(1).split(" ");
-        const command = args.shift();
-        handleCommand(command, message);
+    const content = message.content.toLowerCase();  
+    if (content.startsWith("!")) {  
+        const args = content.slice(1).split(" ");  
+        const command = args.shift();  
+        handleCommand(command, message);  
     }
 });
 
@@ -79,10 +87,13 @@ async function handleCommand(command, interaction) {
     } else if (command === "stop") {
         chatting = false;
         reply(interaction, "bruh i’m out, cya 😴");
-    } else if (command === "join") {
-        reply(interaction, "VC joining temporarily disabled to avoid intent issues.");
-    } else if (command === "leave") {
-        reply(interaction, "VC leaving temporarily disabled.");
+    } else if (command === "slang") {
+        const term = interaction.options.getString('term');
+        if (term) {
+            reply(interaction, getSlangDefinition(term));
+        } else {
+            reply(interaction, "Use `/slang [word]` to get a definition.");
+        }
     }
 }
 
@@ -92,60 +103,83 @@ function reply(target, text) {
     else target.channel.send(text);        // Prefix command response
 }
 
+// 🌟 Get Slang Definition
+function getSlangDefinition(term) {
+    const definitions = {
+        "fr": "For real, meaning 'seriously' or 'I agree'.",
+        "kk": "Okay, cool.",
+        "skibidi": "A viral internet dance/meme trend.",
+        "rizz": "Short for 'charisma', means having game or charm.",
+        "gyat": "A reaction to something attractive.",
+        "cap": "Lie or falsehood.",
+        "based": "Confidently expressing a controversial but true opinion.",
+        "bet": "Agreement or confirmation.",
+        "bruh": "An expression of disbelief or annoyance."
+    };
+    return definitions[term] || "Dawg, I don't know that one 💀";
+}
+
 // 🌟 Chat Handling
 client.on('messageCreate', async message => {
     if (message.author.bot || !chatting) return;
 
-    const content = message.content.toLowerCase();
-    const emojis = message.guild.emojis.cache;
+    const content = message.content.toLowerCase();  
+    const emojis = message.guild.emojis.cache;  
 
-    // 🔸 Handle Personal Questions
-    if (content.includes("your age") || content.includes("how old are you") || content.includes("where are you from")) {
-        return message.reply("nuh uh");
-    }
+    // 🔸 Handle Personal Questions  
+    if (content.includes("your age") || content.includes("how old are you") || content.includes("where are you from")) {  
+        return message.reply("nuh uh");  
+    }  
 
-    // 🔸 React with Custom Emojis
-    if (Math.random() < 0.5) {
-        const emojiArray = Array.from(emojis.values());
-        if (emojiArray.length) message.react(emojiArray[Math.floor(Math.random() * emojiArray.length)]);
-    }
+    // 🔸 React with Custom Emojis  
+    if (Math.random() < 0.5) {  
+        const emojiArray = Array.from(emojis.values());  
+        if (emojiArray.length) message.react(emojiArray[Math.floor(Math.random() * emojiArray.length)]);  
+    }  
 
-    // 🔸 Save Message to SQLite (Infinite Memory)
-    db.run("INSERT INTO messages (user, message) VALUES (?, ?)", [message.author.username, content]);
+    // 🔸 Save Message to SQLite (Infinite Memory)  
+    db.run("INSERT INTO messages (user, message) VALUES (?, ?)", [message.author.username, content]);  
 
-    // 🔸 Random Skip to Feel Natural
-    if (Math.random() < 0.4) return;
+    // 🔸 Random Skip to Feel Natural  
+    if (Math.random() < 0.4) return;  
 
-    // 🔸 Generate AI Response
-    try {
-        db.all("SELECT user, message FROM messages ORDER BY ROWID DESC LIMIT 10", async (err, rows) => {
-            if (err) return console.error("Database Error:", err);
+    // 🔸 Generate AI Response  
+    try {  
+        db.all("SELECT user, message FROM messages ORDER BY ROWID DESC LIMIT 10", async (err, rows) => {  
+            if (err) return console.error("Database Error:", err);  
 
-            const historyMessages = rows.map(row => ({ role: "user", content: `${row.user}: ${row.message}` }));
+            const historyMessages = rows.map(row => ({ role: "user", content: `${row.user}: ${row.message}` }));  
 
-            const response = await axios.post("https://api.openai.com/v1/chat/completions", {
-                model: "gpt-3.5-turbo",
-                messages: [
-                    { role: "system", content: "Act like a Gen Z teenager with chaotic energy." },
-                    ...historyMessages,
-                    { role: "user", content: content }
-                ],
-                max_tokens: 50,
-                temperature: 0.8
-            }, { headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json" } });
+            const response = await axios.post("https://api.openai.com/v1/chat/completions", {  
+                model: "gpt-3.5-turbo",  
+                messages: [  
+                    { role: "system", content: "Act like a Gen Z teenager with chaotic energy." },  
+                    ...historyMessages,  
+                    { role: "user", content: content }  
+                ],  
+                max_tokens: 50,  
+                temperature: 0.8  
+            }, { headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json" } });  
 
-            let reply = response.data.choices[0].message.content;
+            let reply = response.data.choices[0].message.content;  
 
-            // 🔸 Add Slang
-            if (Math.random() < 0.7) {
-                const randomSlang = slangList[Math.floor(Math.random() * slangList.length)];
-                reply += ` ${randomSlang}`;
+            // 🔸 Add Slang  
+            if (Math.random() < 0.7) {  
+                const randomSlang = slangList[Math.floor(Math.random() * slangList.length)];  
+                reply += ` ${randomSlang}`;  
+            }  
+
+            await message.reply(reply);
+
+            // 🔸 Post Relevant Meme  
+            if (Math.random() < 0.3) {  
+                const meme = await fetchMeme();  
+                if (meme) message.channel.send({ files: [meme] });  
             }
 
-            message.reply(reply);
-        });
-    } catch (err) {
-        console.error("OpenAI API Error:", err);
+        });  
+    } catch (err) {  
+        console.error("OpenAI API Error:", err);  
     }
 });
 
@@ -161,17 +195,5 @@ async function fetchMeme() {
     }
 }
 
-// 🌟 Auto Meme Posting
-setInterval(async () => {
-    if (!chatting) return;
-
-    const meme = await fetchMeme();
-    const activeChannels = client.channels.cache.filter(ch => ch.type === 0);
-    const activeChannelsArray = Array.from(activeChannels.values());
-    const randomChannel = activeChannelsArray.length ? activeChannelsArray[Math.floor(Math.random() * activeChannelsArray.length)] : null;
-
-    if (randomChannel && meme) randomChannel.send({ files: [meme] });
-
-}, 60000 * 10);
-
+// 🌟 Bot Login
 client.login(BOT_TOKEN);
