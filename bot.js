@@ -1,20 +1,18 @@
 const { Client, GatewayIntentBits, Partials, REST, Routes, SlashCommandBuilder } = require('discord.js');
 const fetch = require('node-fetch');
-const mongoose = require('mongoose');
+const Database = require('better-sqlite3');
 require('dotenv').config();
 
-// Connect to MongoDB
-mongoose.connect(process.env.MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true })
-    .then(() => console.log('✅ Connected to MongoDB'))
-    .catch(err => console.error('❌ MongoDB Connection Error:', err));
-
-// Define Schema & Model for Persistent Chat History
-const chatSchema = new mongoose.Schema({
-    user: String,
-    content: String,
-    timestamp: { type: Date, default: Date.now }
-});
-const ChatMessage = mongoose.model('ChatMessage', chatSchema);
+// Setup SQLite Database
+const db = new Database('chat.db');
+db.exec(`
+    CREATE TABLE IF NOT EXISTS chat_messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user TEXT,
+        content TEXT,
+        timestamp TEXT DEFAULT (datetime('now', 'localtime'))
+    )
+`);
 
 // Bot Client Setup
 const client = new Client({
@@ -29,7 +27,7 @@ const client = new Client({
 let chatting = false;
 let isPaused = false;
 let messageCounter = 0;
-const messagesBeforeReply = Math.floor(Math.random() * 2) + 2; // Reply after 2-3 messages
+const messagesBeforeReply = Math.floor(Math.random() * 2) + 2; // 2-3 messages before responding
 const slangResponses = ["skibidi", "fr bro 💀", "nahh that's crazy", "ong", "ight bet", "kk", "yep", "dawg chill", "bruh", "L take", "based", "💀", "🔥", "🤡"];
 
 // Define Slash Commands
@@ -66,7 +64,7 @@ client.on('interactionCreate', async interaction => {
     if (commandName === 'start') {
         if (chatting) return interaction.reply("aight bet, i'm already awake.. stop doing that shit 💀");
         chatting = true;
-        messageCounter = 0; // Reset counter when chat starts
+        messageCounter = 0;
         interaction.reply("ight bet, i'm awake now 🥶");
     } else if (commandName === 'stop') {
         chatting = false;
@@ -82,53 +80,39 @@ client.on('interactionCreate', async interaction => {
     }
 });
 
-// Message Handling with Realistic Response Timing
+// Message Handling
 client.on('messageCreate', async message => {
-    if (message.author.bot) return; // Ignore bot messages
+    if (message.author.bot) return; 
 
     console.log(`📩 Received message from ${message.author.username}: ${message.content}`);
 
-    if (!chatting) {
-        console.log("❌ Ignored message - Chat mode is OFF.");
-        return;
-    }
+    if (!chatting || isPaused) return; 
 
-    if (isPaused) {
-        console.log("⏸️ Ignored message - Bot is paused.");
-        return;
-    }
-
-    messageCounter++; // Increase message count
+    messageCounter++;
     console.log(`💬 Message Count: ${messageCounter}/${messagesBeforeReply}`);
 
-    if (messageCounter < messagesBeforeReply) {
-        console.log("⏳ Waiting for more messages before responding.");
-        return;
-    }
+    if (messageCounter < messagesBeforeReply) return;
 
-    // Reset message counter & determine new reply interval
     messageCounter = 0;
-    messagesBeforeReply = Math.floor(Math.random() * 2) + 2; // 2-3 messages
+    messagesBeforeReply = Math.floor(Math.random() * 2) + 2;
 
-    if (Math.random() < 0.15) {
-        console.log("🎲 Skipping response (15% probability).");
-        return;
-    }
+    if (Math.random() < 0.15) return; 
 
     try {
-        // Save user message to MongoDB
-        await new ChatMessage({ user: message.author.username, content: message.content }).save();
+        // Save user message to SQLite
+        const stmt = db.prepare("INSERT INTO chat_messages (user, content) VALUES (?, ?)");
+        stmt.run(message.author.username, message.content);
 
-        // Bot reacts with random emoji
+        // React with a random emoji (30% chance)
         if (Math.random() < 0.30) {
             const emojis = ["😂", "💀", "🔥", "🤡", "😭", "🤣", "🥶"];
             await message.react(emojis[Math.floor(Math.random() * emojis.length)]);
         }
 
         // Fetch last 100 messages for AI
-        const chatHistory = await ChatMessage.find().sort({ timestamp: -1 }).limit(100);
+        const chatHistory = db.prepare("SELECT content FROM chat_messages ORDER BY timestamp DESC LIMIT 100").all();
 
-        // Call OpenAI API for response
+        // Call OpenAI API
         const response = await fetch("https://api.openai.com/v1/chat/completions", {
             method: "POST",
             headers: {
@@ -143,12 +127,7 @@ client.on('messageCreate', async message => {
         });
 
         const data = await response.json();
-        let reply = data.choices?.[0]?.message?.content;
-
-        if (!reply) {
-            console.error("❌ OpenAI returned empty response. Using fallback.");
-            reply = slangResponses[Math.floor(Math.random() * slangResponses.length)];
-        }
+        let reply = data.choices?.[0]?.message?.content || slangResponses[Math.floor(Math.random() * slangResponses.length)];
 
         await message.reply(reply);
     } catch (error) {
@@ -157,33 +136,10 @@ client.on('messageCreate', async message => {
     }
 });
 
-// Fetch Meme
-async function fetchMeme() {
-    try {
-        const response = await fetch("https://www.reddit.com/r/memes/random.json");
-        const json = await response.json();
-        return json[0].data.children[0].data.url || "bruh, no memes found 💀";
-    } catch (error) {
-        console.error("❌ Meme fetch error:", error);
-        return "bruh, meme API broke 💀";
-    }
-}
-
-// Fetch GIF
-async function fetchGif() {
-    try {
-        const response = await fetch(`https://tenor.googleapis.com/v2/search?q=random&key=${process.env.TENOR_API_KEY}&limit=1`);
-        const json = await response.json();
-        return json.results[0]?.url || "bruh, no GIFs found 💀";
-    } catch (error) {
-        console.error("❌ GIF fetch error:", error);
-        return "bruh, Tenor broke 💀";
-    }
-}
-
-// Log any errors
+// Log Errors
 client.on('error', (error) => {
     console.error('❌ Discord Client Error:', error);
 });
 
+// Start Bot
 client.login(process.env.BOT_TOKEN);
