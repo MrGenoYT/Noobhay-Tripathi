@@ -3,7 +3,13 @@ const fetch = require('node-fetch');
 const Database = require('better-sqlite3');
 require('dotenv').config();
 
-// Setup SQLite Database
+// API Keys & Bot Info
+const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
+const CLIENT_ID = process.env.DISCORD_CLIENT_ID;
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const TENOR_API_KEY = process.env.TENOR_API_KEY;
+
+// Database Setup for Infinite Memory & Learning Behavior
 const db = new Database('chat.db');
 db.exec(`
     CREATE TABLE IF NOT EXISTS chat_messages (
@@ -11,135 +17,167 @@ db.exec(`
         user TEXT,
         content TEXT,
         timestamp TEXT DEFAULT (datetime('now', 'localtime'))
-    )
+    );
+    CREATE TABLE IF NOT EXISTS user_data (
+        user_id TEXT PRIMARY KEY,
+        behavior TEXT DEFAULT '{}'
+    );
 `);
 
-// Bot Client Setup
+// Client Setup
 const client = new Client({
-    intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent
-    ],
-    partials: [Partials.Channel],
+    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
+    partials: [Partials.Channel]
 });
 
+// Bot Variables
+const botName = "Noobhay Tripathi";
 let chatting = false;
-let isPaused = false;
+let lastMessageTime = Date.now();
+let inactivityMessageSent = false;
+const greetings = ["hi", "hello", "hey", "yo", "sup", "wassup", "greetings", "noobhay"];
 let messageCounter = 0;
-const messagesBeforeReply = Math.floor(Math.random() * 2) + 2; // 2-3 messages before responding
-const slangResponses = ["skibidi", "fr bro 💀", "nahh that's crazy", "ong", "ight bet", "kk", "yep", "dawg chill", "bruh", "L take", "based", "💀", "🔥", "🤡"];
+let messagesBeforeReply = Math.floor(Math.random() * 2) + 2;
 
-// Define Slash Commands
+// Slash Commands Setup
 const commands = [
-    new SlashCommandBuilder().setName('start').setDescription('Start chat mode'),
-    new SlashCommandBuilder().setName('stop').setDescription('Stop chat mode'),
-    new SlashCommandBuilder()
-        .setName('timepause')
-        .setDescription('Pause bot responses for X minutes')
-        .addIntegerOption(option =>
-            option.setName('minutes')
-                .setDescription('Minutes to pause')
-                .setRequired(true)
-        )
-].map(command => command.toJSON());
+    new SlashCommandBuilder().setName('start').setDescription('Starts the bot chat'),
+    new SlashCommandBuilder().setName('stop').setDescription('Stops the bot chat')
+].map(cmd => cmd.toJSON());
 
-// Register Slash Commands
-const rest = new REST({ version: '10' }).setToken(process.env.BOT_TOKEN);
+const rest = new REST({ version: '10' }).setToken(DISCORD_TOKEN);
 client.once('ready', async () => {
-    console.log(`✅ Logged in as ${client.user.tag}`);
     try {
-        await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
-        console.log('✅ Slash commands registered.');
+        console.log('🚀 Registering slash commands...');
+        await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
+        console.log('✅ Slash commands registered!');
     } catch (error) {
         console.error('❌ Error registering commands:', error);
     }
+    console.log(`${botName} is online! 🚀`);
 });
+
+// Fetch & Save User Behavior
+function getUserBehavior(userId) {
+    const data = db.prepare("SELECT behavior FROM user_data WHERE user_id = ?").get(userId);
+    return data ? JSON.parse(data.behavior) : {};
+}
+
+function saveUserBehavior(userId, behavior) {
+    const existing = getUserBehavior(userId);
+    const updated = { ...existing, ...behavior };
+    db.prepare("INSERT INTO user_data (user_id, behavior) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET behavior = ?")
+      .run(userId, JSON.stringify(updated), JSON.stringify(updated));
+}
+
+// OpenAI Chat with Learning
+async function chatWithOpenAI(userId, userMessage) {
+    const chatHistory = db.prepare("SELECT content FROM chat_messages ORDER BY timestamp DESC LIMIT 50").all().map(m => m.content);
+    const userBehavior = getUserBehavior(userId);
+
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+            "Authorization": `Bearer ${OPENAI_API_KEY}`,
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+            model: "gpt-4",
+            messages: [
+                {
+                    role: "system",
+                    content: `You are ${botName}, a human-like Discord bot that learns user behavior and improves responses over time. Your knowledge about this user: ${JSON.stringify(userBehavior)}`
+                },
+                ...chatHistory.map(m => ({ role: "user", content: m })),
+                { role: "user", content: userMessage }
+            ],
+            max_tokens: 150,
+            temperature: 0.8
+        })
+    });
+
+    const data = await response.json();
+    const reply = data.choices?.[0]?.message?.content || "bruh, i’m having a stroke 💀";
+
+    // Learn new behavior from the conversation
+    if (reply.includes("favorite topic")) {
+        userBehavior.favoriteTopic = userMessage;
+        saveUserBehavior(userId, userBehavior);
+    }
+
+    return reply;
+}
+
+// Get Random Meme
+async function getRandomMeme() {
+    const response = await fetch('https://www.reddit.com/r/memes/random.json');
+    const data = await response.json();
+    return data[0].data.children[0].data.url;
+}
+
+// Get Random GIF
+async function getRandomGif(keyword) {
+    const response = await fetch(`https://api.tenor.com/v1/search?q=${keyword}&key=${TENOR_API_KEY}&limit=1`);
+    const data = await response.json();
+    return data.results.length ? data.results[0].media[0].gif.url : null;
+}
 
 // Slash Command Handling
 client.on('interactionCreate', async interaction => {
     if (!interaction.isCommand()) return;
-    const { commandName } = interaction;
 
-    if (commandName === 'start') {
-        if (chatting) return interaction.reply("aight bet, i'm already awake.. stop doing that shit 💀");
+    if (interaction.commandName === 'start') {
         chatting = true;
-        messageCounter = 0;
-        interaction.reply("ight bet, i'm awake now 🥶");
-    } else if (commandName === 'stop') {
+        return interaction.reply("Alright, I'm awake. Let's chat! 🤖");
+    } else if (interaction.commandName === 'stop') {
         chatting = false;
-        interaction.reply("bruh i’m out, cya 😴");
-    } else if (commandName === 'timepause') {
-        const minutes = interaction.options.getInteger('minutes');
-        isPaused = true;
-        interaction.reply(`Bot paused for ${minutes} mins.`);
-        setTimeout(() => {
-            isPaused = false;
-            interaction.followUp('Bot back online.');
-        }, minutes * 60 * 1000);
+        return interaction.reply("Fine. I'll shut up. 😶");
     }
 });
 
 // Message Handling
 client.on('messageCreate', async message => {
-    if (message.author.bot) return; 
+    if (message.author.bot || !chatting) return;
 
-    console.log(`📩 Received message from ${message.author.username}: ${message.content}`);
+    const messageContent = message.content.toLowerCase();
+    lastMessageTime = Date.now();
+    inactivityMessageSent = false;
 
-    if (!chatting || isPaused) return; 
+    // Instant Replies for Greetings (60% chance)
+    if (greetings.includes(messageContent) && Math.random() > 0.4) {
+        const response = await chatWithOpenAI(message.author.id, messageContent);
+        return message.reply(response);
+    }
 
     messageCounter++;
-    console.log(`💬 Message Count: ${messageCounter}/${messagesBeforeReply}`);
-
     if (messageCounter < messagesBeforeReply) return;
+
+    if (Math.random() < 0.3) return;
 
     messageCounter = 0;
     messagesBeforeReply = Math.floor(Math.random() * 2) + 2;
 
-    if (Math.random() < 0.15) return; 
-
-    try {
-        // Save user message to SQLite
-        const stmt = db.prepare("INSERT INTO chat_messages (user, content) VALUES (?, ?)");
-        stmt.run(message.author.username, message.content);
-
-        // React with a random emoji (30% chance)
-        if (Math.random() < 0.30) {
-            const emojis = ["😂", "💀", "🔥", "🤡", "😭", "🤣", "🥶"];
-            await message.react(emojis[Math.floor(Math.random() * emojis.length)]);
-        }
-
-        // Fetch last 100 messages for AI
-        const chatHistory = db.prepare("SELECT content FROM chat_messages ORDER BY timestamp DESC LIMIT 100").all();
-
-        // Call OpenAI API
-        const response = await fetch("https://api.openai.com/v1/chat/completions", {
-            method: "POST",
-            headers: {
-                "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-                model: "gpt-3.5-turbo",
-                messages: chatHistory.reverse().map(m => ({ role: "user", content: m.content })),
-                max_tokens: 100
-            })
-        });
-
-        const data = await response.json();
-        let reply = data.choices?.[0]?.message?.content || slangResponses[Math.floor(Math.random() * slangResponses.length)];
-
-        await message.reply(reply);
-    } catch (error) {
-        console.error("❌ Error in AI Response:", error);
-        await message.reply("bruh, something broke 💀");
+    // Meme/GIF Replies (25% chance)
+    if (Math.random() < 0.25) {
+        const gifUrl = await getRandomGif("funny");
+        if (gifUrl) return message.reply(gifUrl);
     }
+
+    const aiResponse = await chatWithOpenAI(message.author.id, message.content);
+    message.reply(aiResponse);
 });
 
-// Log Errors
-client.on('error', (error) => {
-    console.error('❌ Discord Client Error:', error);
-});
+// Inactivity Message
+setInterval(() => {
+    if (!chatting || inactivityMessageSent) return;
+    if (Date.now() - lastMessageTime > 45 * 60 * 1000) {
+        client.channels.cache.forEach(channel => {
+            if (channel.isTextBased()) {
+                channel.send("Yo, this place is deader than my social life. Someone say something 💀");
+                inactivityMessageSent = true;
+            }
+        });
+    }
+}, 60000);
 
-// Start Bot
-client.login(process.env.BOT_TOKEN);
+client.login(DISCORD_TOKEN);
