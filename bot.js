@@ -1,10 +1,11 @@
-const { Client, GatewayIntentBits, Partials, REST, Routes } = require('discord.js');
+const { Client, GatewayIntentBits, Partials, REST, Routes, SlashCommandBuilder } = require('discord.js');
 const axios = require('axios');
 const express = require('express');
 const fs = require('fs');
 const sqlite3 = require('sqlite3').verbose();
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
+const CLIENT_ID = process.env.CLIENT_ID;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const REDDIT_MEME_API = "https://www.reddit.com/r/memes/top.json?limit=50&t=day";
 
@@ -12,7 +13,7 @@ const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.GuildMembers,  // Added to comply with Discord's new policies
+        GatewayIntentBits.GuildMembers
     ],
     partials: [Partials.Channel]
 });
@@ -33,48 +34,63 @@ const slangList = ["fr", "kk", "skibidi", "rizz", "gyat", "cap", "based", "bet",
 
 let chatting = false;
 
- const commands = [
-    { name: 'start', description: 'Start the bot’s chat mode' },
-    { name: 'stop', description: 'Stop the bot’s chat mode' },
-    { name: 'join', description: 'Join a voice channel (Disabled)' },
-    { name: 'leave', description: 'Leave a voice channel (Disabled)' }
-];
+// 🌟 Slash Command Registration
+const commands = [
+    new SlashCommandBuilder().setName('start').setDescription('Start the chat mode'),
+    new SlashCommandBuilder().setName('stop').setDescription('Stop the chat mode'),
+    new SlashCommandBuilder().setName('join').setDescription('Join VC (currently disabled)'),
+    new SlashCommandBuilder().setName('leave').setDescription('Leave VC (currently disabled)')
+].map(command => command.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(BOT_TOKEN);
-
-(async () => {
+async function registerCommands() {
     try {
         console.log('Registering slash commands...');
-        await rest.put(
-            Routes.applicationCommands(client.user.id),
-            { body: commands }
-        );
-        console.log('Slash commands registered.');
+        await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
+        console.log('Slash commands registered successfully!');
     } catch (error) {
-        console.error('Error registering commands:', error);
+        console.error('Error registering slash commands:', error);
     }
-})();
+}
+registerCommands();
 
+// 🌟 Slash & Prefix Command Handling
 client.on('interactionCreate', async interaction => {
-    if (!interaction.isChatInputCommand()) return;
+    if (!interaction.isCommand()) return;
+    handleCommand(interaction.commandName, interaction);
+});
 
-    switch (interaction.commandName) {
-        case 'start':
-            chatting = true;
-            await interaction.reply("aight bet, i'm awake now 🥶");
-            break;
-        case 'stop':
-            chatting = false;
-            await interaction.reply("bruh i’m out, cya 😴");
-            break;
-        case 'join':
-            await interaction.reply("VC joining temporarily disabled to avoid intent issues.");
-            break;
-        case 'leave':
-            await interaction.reply("VC leaving temporarily disabled.");
-            break;
+client.on('messageCreate', async message => {
+    if (message.author.bot) return;
+
+    const content = message.content.toLowerCase();
+    if (content.startsWith("!")) {
+        const args = content.slice(1).split(" ");
+        const command = args.shift();
+        handleCommand(command, message);
     }
 });
+
+// 🌟 Command Execution Function
+async function handleCommand(command, interaction) {
+    if (command === "start") {
+        chatting = true;
+        reply(interaction, "aight bet, i'm awake now 🥶");
+    } else if (command === "stop") {
+        chatting = false;
+        reply(interaction, "bruh i’m out, cya 😴");
+    } else if (command === "join") {
+        reply(interaction, "VC joining temporarily disabled to avoid intent issues.");
+    } else if (command === "leave") {
+        reply(interaction, "VC leaving temporarily disabled.");
+    }
+}
+
+// 🌟 Reply Helper Function
+function reply(target, text) {
+    if (target.reply) target.reply(text);  // Slash command response
+    else target.channel.send(text);        // Prefix command response
+}
 
 // 🌟 Chat Handling
 client.on('messageCreate', async message => {
@@ -155,6 +171,7 @@ setInterval(async () => {
     const randomChannel = activeChannelsArray.length ? activeChannelsArray[Math.floor(Math.random() * activeChannelsArray.length)] : null;
 
     if (randomChannel && meme) randomChannel.send({ files: [meme] });
+
 }, 60000 * 10);
 
 client.login(BOT_TOKEN);
