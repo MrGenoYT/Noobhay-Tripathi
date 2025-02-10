@@ -1,0 +1,19 @@
+{
+  "name": "noobhay-tripathi-bot",
+  "version": "1.0.0",
+  "description": "A chaotic Gen Z Discord bot that chats, reacts, uses memes, and joins VC with TTS.",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.11.0",
+    "axios": "^1.6.0",
+    "dotenv": "^16.0.3",
+    "express": "^4.18.2",
+    "fs": "latest"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}
