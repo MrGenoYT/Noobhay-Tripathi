@@ -1,15 +1,14 @@
 {
-  "name": "discord-genz-bot",
+  "name": "discord-bot",
   "version": "1.0.0",
-  "description": "A Gen Z Discord bot with memory, memes, and AI chat.",
   "main": "bot.js",
+  "dependencies": {
+    "discord.js": "^14.0.3",
+    "axios": "^1.6.1",
+    "express": "^4.18.2",
+    "sqlite3": "^5.1.4"
+  },
   "scripts": {
     "start": "node bot.js"
-  },
-  "dependencies": {
-    "discord.js": "^14.9.0",
-    "axios": "^1.6.0",
-    "dotenv": "^16.4.0",
-    "express": "^4.18.2"
   }
 }
