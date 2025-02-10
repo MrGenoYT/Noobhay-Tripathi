@@ -1,25 +1,20 @@
 {
-  "name": "discord-chat-bot",
+  "name": "noobhay-bot",
   "version": "1.0.0",
-  "description": "A Discord chat bot using SQLite for local storage.",
-  "main": "index.js",
+  "description": "A human-like Discord chatbot with OpenAI, infinite memory, and meme/gif responses.",
+  "main": "bot.js",
   "scripts": {
-    "start": "node index.js",
-    "dev": "nodemon index.js"
+    "start": "node bot.js"
   },
   "dependencies": {
-    "discord.js": "^14.14.1",
-    "dotenv": "^16.0.3",
-    "better-sqlite3": "^9.0.1",
+    "better-sqlite3": "^8.5.2",
+    "discord.js": "^14.11.0",
+    "dotenv": "^16.4.0",
     "node-fetch": "^2.6.7"
-  },
-  "devDependencies": {
-    "nodemon": "^3.0.1"
   },
   "engines": {
     "node": ">=16.9.0"
   },
-  "keywords": ["discord", "bot", "chat", "openai", "sqlite"],
   "author": "Your Name",
   "license": "MIT"
 }
