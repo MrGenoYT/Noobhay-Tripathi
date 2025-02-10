@@ -10,7 +10,6 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const REDDIT_MEME_API = "https://www.reddit.com/r/memes/top.json?limit=50&t=day";
 const TENOR_API_KEY = process.env.TENOR_API_KEY;
 
-// 🌟 Initialize Discord Client
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -26,16 +25,17 @@ const app = express();
 app.get("/", (req, res) => res.send("Bot is running!"));
 app.listen(3000, () => console.log("Web server running on port 3000"));
 
-// 🌟 SQLite for Infinite Memory
+// 🌟 SQLite Persistent Memory
 const db = new sqlite3.Database("./chat_memory.db", (err) => {
     if (err) console.error("Database Error:", err);
-    else db.run("CREATE TABLE IF NOT EXISTS messages (user TEXT, message TEXT)");
+    else db.run("CREATE TABLE IF NOT EXISTS messages (user TEXT, message TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)");
 });
 
 // 🌟 Gen Z Slang List
 const slangList = ["fr", "kk", "skibidi", "rizz", "gyat", "cap", "based", "bet", "vibe", "drip", "bruh", "sus", "simp", "yeet", "bussin", "no cap", "mid", "fax", "pov", "moots", "ratio", "yap", "goofy", "smh", "idk", "lmao", "goated", "fyp", "cringe", "edgelord", "stan", "deadass", "woke", "hella", "lit", "chad", "sigma", "brokie", "boomer", "npc", "touch grass", "irl", "w", "l", "nah", "sus af", "crying fr", "i can’t 💀"];
 
 let chatting = false;
+let skippedMessages = 0;
 
 // 🌟 Slash Commands
 const commands = [
@@ -58,15 +58,14 @@ registerCommands();
 // 🌟 Slash Command Handling
 client.on('interactionCreate', async interaction => {
     if (!interaction.isCommand()) return;
-
+    
     if (interaction.commandName === "start") {
         if (chatting) {
-            return interaction.reply("i'm already awake.. stop doing that shit 💀");
+            return interaction.reply("aight bet, i'm already awake.. stop doing that shit 💀");
         }
         chatting = true;
         interaction.reply("aight bet, i'm awake now 🥶");
-    } 
-    else if (interaction.commandName === "stop") {
+    } else if (interaction.commandName === "stop") {
         chatting = false;
         interaction.reply("bruh i’m out, cya 😴");
     }
@@ -75,30 +74,39 @@ client.on('interactionCreate', async interaction => {
 // 🌟 Message Handling (AI-Powered)
 client.on('messageCreate', async message => {
     if (message.author.bot) return;
-    if (!chatting) return; // Bot only responds if /start is used
 
-    const content = message.content.toLowerCase();  
+    const content = message.content.toLowerCase();
     const emojis = message.guild.emojis.cache;
-    
-    // 🔸 Log Message to Memory
+
+    // 🔸 Store Message in Database for Persistent Memory
     db.run("INSERT INTO messages (user, message) VALUES (?, ?)", [message.author.username, content]);  
 
-    // 🔸 30% chance to reply when someone says "Noobhay"
+    // 🔸 If "Noobhay" is mentioned (30% chance)
     if (content.includes("noobhay") && Math.random() < 0.3) {
         return message.reply("bro stop talking abt me 💀");
     }
 
-    // 🔸 Skip messages naturally (Replies every 2-3 messages)
-    if (Math.random() < 0.5) return;
+    // 🔸 Natural Skip Logic (10% chance to ignore)
+    if (Math.random() < 0.1) {
+        skippedMessages++;
+        return;
+    }
+
+    // 🔸 Always Reply After 3 Skipped Messages
+    if (skippedMessages >= 3) {
+        skippedMessages = 0;
+    } else {
+        return;
+    }
 
     try {
-        // 🔹 Get Full Chat History
-        db.all("SELECT user, message FROM messages ORDER BY ROWID DESC", async (err, rows) => {
+        // 🔹 Get **Last 50 Messages** for Context
+        db.all("SELECT user, message FROM messages ORDER BY timestamp DESC LIMIT 50", async (err, rows) => {
             if (err) return console.error("Database Error:", err);
 
             const historyMessages = rows.map(row => ({ role: "user", content: `${row.user}: ${row.message}` }));
 
-            // 🔹 AI Chat Response with Persistent Memory
+            // 🔹 Send Context to OpenAI API
             const response = await axios.post("https://api.openai.com/v1/chat/completions", {
                 model: "gpt-3.5-turbo",
                 messages: [
@@ -106,7 +114,7 @@ client.on('messageCreate', async message => {
                     ...historyMessages,
                     { role: "user", content: content }
                 ],
-                max_tokens: 100,
+                max_tokens: 50,
                 temperature: 0.8
             }, { headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json" } });
 
@@ -148,8 +156,7 @@ client.on('messageCreate', async message => {
 async function fetchMeme() {
     try {
         const res = await axios.get(REDDIT_MEME_API);
-        const memes = res.data.data.children.map(post => post.data.url);
-        return memes[Math.floor(Math.random() * memes.length)];
+        return res.data.data.children.map(post => post.data.url)[Math.floor(Math.random() * 50)];
     } catch (err) {
         console.error("Reddit API Error:", err);
         return null;
@@ -160,8 +167,7 @@ async function fetchMeme() {
 async function fetchGif(query) {
     try {
         const res = await axios.get(`https://g.tenor.com/v1/search?q=${encodeURIComponent(query)}&key=${TENOR_API_KEY}&limit=10`);
-        const gifs = res.data.results.map(gif => gif.media[0].gif.url);
-        return gifs.length ? gifs[Math.floor(Math.random() * gifs.length)] : null;
+        return res.data.results.map(gif => gif.media[0].gif.url)[Math.floor(Math.random() * 10)];
     } catch (err) {
         console.error("Tenor API Error:", err);
         return null;
