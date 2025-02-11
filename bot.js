@@ -1,44 +1,20 @@
-import { Client, GatewayIntentBits, Partials, Collection } from "discord.js";
+import { Client, GatewayIntentBits, Partials } from "discord.js";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import fetch from "node-fetch";
 import sqlite3 from "sqlite3";
 import dotenv from "dotenv";
 import express from "express";
-import fs from "fs";
 
-// -------------------------
-// Load Environment Variables
-// -------------------------
 dotenv.config();
-const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const TENOR_API_KEY = process.env.TENOR_API_KEY;
-
-// -------------------------
-// Error Logging Function
-// -------------------------
-function logError(error) {
-  console.error(error);
-  fs.appendFile(
-    "error.log",
-    `${new Date().toISOString()} - ${error.toString()}\n`,
-    (err) => {
-      if (err) console.error("Failed to write error log:", err);
-    }
-  );
-}
+const { DISCORD_TOKEN, DISCORD_CLIENT_ID, GEMINI_API_KEY, TENOR_API_KEY, PORT } = process.env;
 
 // -------------------------
 // Database Setup & Helpers
 // -------------------------
-const db = new sqlite3.Database(
-  "chat.db",
-  sqlite3.OPEN_READWRITE | sqlite3.OPEN_CREATE,
-  (err) => {
-    if (err) console.error("❌ Database Connection Error:", err);
-    else console.log("✅ Connected to SQLite Database.");
-  }
-);
+const db = new sqlite3.Database("chat.db", sqlite3.OPEN_READWRITE | sqlite3.OPEN_CREATE, (err) => {
+  if (err) console.error("❌ Database Connection Error:", err);
+  else console.log("✅ Connected to SQLite Database.");
+});
 
 const dbQuery = (query, params = []) =>
   new Promise((resolve, reject) => {
@@ -56,13 +32,13 @@ const dbRun = (query, params = []) =>
     });
   });
 
-// Create tables if not exists
+// Create tables for chat history, user data, and mood
 db.serialize(() => {
   db.run(`CREATE TABLE IF NOT EXISTS chat_messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT, 
     user TEXT, 
     content TEXT, 
-    timestamp TEXT DEFAULT (datetime('now','localtime'))
+    timestamp TEXT DEFAULT (datetime('now', 'localtime'))
   );`);
   db.run(`CREATE TABLE IF NOT EXISTS user_data (
     user_id TEXT PRIMARY KEY, 
@@ -75,64 +51,37 @@ db.serialize(() => {
 });
 
 // -------------------------
-// Gemini AI Setup & Personality Instructions
+// Gemini AI Setup & Instructions
 // -------------------------
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-// Updated personality prompt:
-// - Lives in India, 14 years old, loves roblox
-// - Uses gen z slang, concise responses (15-40 words max), less cringe, but asks questions occasionally.
-// - Incorporates the user's display name if available.
+// Bot personality instructions updated as requested
 const botInstructions = `
-you are noobhay tripathi, a 14-year-old from india who loves playing roblox.
-be chill, a bit insecure but real. use gen z slang, be concise, and keep each reply between 15 and 40 words.
-avoid being too cringe; answer like a normal human with a gen z twist.
-incorporate the user's name when possible.
-ask questions sometimes and reason based on past chats.
+you are noobhay tripathi, a 14-year-old human who loves playing roblox and lives in india.
+you're a bit overweight and insecure but don’t give a flying shit.
+speak in lowercase using gen z slang; keep responses short (15-35 words), natural, and not too cringe.
+mix in occasional emojis (especially skulls) and use phrases like:
+"zigga open your eyes are you fockinh dumb", "you dumbahh", "bro you know you should kys",
+"hell nawh kys zigga", "yeah man idc about ts tbh 💀🙏", "stop yapping bitch ahh", "bruv ;-;", "i’ll touch you", "aight ima dip now", "get ou"
+ask questions sometimes and learn from the convo.
 `;
 
 // -------------------------
 // Discord Client Setup
 // -------------------------
 const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent,
-  ],
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
   partials: [Partials.Channel],
 });
+
 const botName = "noobhay tripathi";
 let chatting = false;
-let lastMessageTime = Date.now();
-const botMessageIds = new Set();
-// Store the last reply to avoid duplicates
 let lastReply = "";
+const botMessageIds = new Set();
 
-// For conversation control: track per-channel conversation state
+// Conversation tracking per channel
 const conversationTracker = new Map();
-
-// Periodically reset conversation trackers (e.g., every hour)
-setInterval(() => {
-  conversationTracker.clear();
-}, 3600000);
-
-// -------------------------
-// Response Arrays for Slash Commands
-// -------------------------
-const startReplies = [
-  "ayyy i'm awake 💀",
-  "yo wassup 😎",
-  "ready to chat, let's go! 🔥",
-  "oh, finally someone noticed me 😤",
-];
-const stopReplies = [
-  "fine, i'm out 💀",
-  "peace out ✌️",
-  "imma dip now 😤",
-  "later, nerds 👋",
-];
 
 // -------------------------
 // Utility Functions
@@ -150,202 +99,167 @@ function getRandomEmoji(message) {
 }
 
 // -------------------------
-// Meme & GIF Fetch Functions
+// Meme & GIF Functions with Better Error Handling
 // -------------------------
 async function getRandomMeme() {
   try {
     const response = await fetch("https://www.reddit.com/r/memes/random.json", {
-      headers: { "User-Agent": "noobhay-tripathi-bot/1.0" },
+      headers: { "User-Agent": "noobhay-tripathi-bot/1.0" }
     });
-    if (!response.ok) {
-      throw new Error(`Reddit API Error: ${response.status} ${response.statusText}`);
-    }
+    if (!response.ok) throw new Error(`Reddit API error: ${response.status} ${response.statusText}`);
     const data = await response.json();
-    return data[0].data.children[0].data.url;
+    return data[0]?.data?.children[0]?.data?.url || "couldn't fetch a meme, bruh";
   } catch (error) {
-    logError(error);
+    console.error("❌ Meme Fetch Error:", error);
     return "couldn't fetch a meme, bruh";
   }
 }
 
 async function getRandomGif(keyword) {
   try {
-    const url = `https://tenor.googleapis.com/v2/search?q=${encodeURIComponent(
-      keyword
-    )}&key=${TENOR_API_KEY}&limit=1`;
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`Tenor API Error: ${response.status} ${response.statusText}`);
-    }
+    // Using Tenor v1 endpoint for reliability
+    const response = await fetch(`https://g.tenor.com/v1/search?key=${TENOR_API_KEY}&q=${encodeURIComponent(keyword)}&limit=1`);
+    if (!response.ok) throw new Error(`Tenor API error: ${response.status} ${response.statusText}`);
     const data = await response.json();
-    if (data.results && data.results.length > 0 && data.results[0].media_formats && data.results[0].media_formats.gif) {
-      return data.results[0].media_formats.gif.url;
+    if (data.results && data.results.length > 0 && data.results[0].media && data.results[0].media[0]?.gif?.url) {
+      return data.results[0].media[0].gif.url;
     }
-    return "couldn't find a gif, bruh";
+    throw new Error("No GIF results found");
   } catch (error) {
-    logError(error);
+    console.error("❌ GIF Fetch Error:", error);
     return "couldn't fetch a gif, bruh";
   }
 }
 
 // -------------------------
-// Search Chat History for Similar Content
+// Gemini Chat Function with Year-Long Memory & History Search
 // -------------------------
-async function searchChatHistory(query) {
+async function chatWithGemini(userId, userMessage) {
   try {
-    // Use the whole query string to search in the last year
-    const sql = `
-      SELECT content FROM chat_messages 
-      WHERE timestamp >= datetime('now', '-1 year') AND content LIKE ? 
-      ORDER BY timestamp DESC LIMIT 10
-    `;
-    const rows = await dbQuery(sql, [`%${query}%`]);
-    if (rows && rows.length) {
-      // Join all found chats as context
-      return rows.map((r) => r.content).join("\n");
-    }
-    return "";
-  } catch (error) {
-    logError(error);
-    return "";
-  }
-}
-
-// -------------------------
-// Gemini Chat Function
-// -------------------------
-async function chatWithGemini(userId, displayName, userMessage) {
-  try {
-    // Get recent conversation context (last 25 messages from 1 year)
+    // Retrieve the last 25 messages from the past year (ordered from oldest to newest)
     const recentRows = await dbQuery(
-      `SELECT content FROM chat_messages 
-       WHERE timestamp >= datetime('now', '-1 year') 
-       ORDER BY timestamp DESC LIMIT 25`
+      "SELECT content FROM chat_messages WHERE timestamp >= datetime('now', '-365 days') ORDER BY id DESC LIMIT 25"
     );
-    const recentChat = recentRows.map((r) => r.content).join("\n");
+    const recentChat = recentRows.reverse().map(r => r.content).join("\n");
 
-    // Search for similar past chats using the whole message as query
-    const similarChats = await searchChatHistory(userMessage);
+    // Search the entire year's history for a message that contains the whole line (if any)
+    const similarRows = await dbQuery(
+      "SELECT content FROM chat_messages WHERE timestamp >= datetime('now', '-365 days') AND content LIKE ? LIMIT 1",
+      [`%${userMessage}%`]
+    );
+    let similarContext = "";
+    if (similarRows.length > 0) {
+      similarContext = `\npreviously someone said: "${similarRows[0].content}"`;
+    }
 
-    // Build the prompt with all context, including the user's display name
+    // Build the prompt with all context
     const prompt = `${botInstructions}
-user (${displayName}): ${userMessage}
-recent conversation:
+recent conversation (last 25 msgs):
 ${recentChat}
-${similarChats ? "previous similar chats:\n" + similarChats : ""}
-reply (remember: keep it short between 15 and 40 words, avoid extra cringe, and include a question sometimes):`;
+new message from user: ${userMessage}${similarContext}
+reply (keep it natural with gen z slang, 15-35 words max, ask a question sometimes):`;
 
     const result = await model.generateContent(prompt);
     let reply = result.response.text() || "uhhh my brain lagged 💀";
 
-    // Post-process reply: trim each sentence to a max of 35 words and overall max 40 words
-    reply = reply
-      .split(".")
-      .map((sentence) => {
-        const words = sentence.trim().split(/\s+/);
-        return words.length > 35 ? words.slice(0, 35).join(" ") : sentence.trim();
-      })
-      .join(". ");
-    const allWords = reply.split(/\s+/);
-    if (allWords.length > 40) {
-      reply = allWords.slice(0, 40).join(" ");
-    }
+    // Enforce word count limits: max 35 words (if over, trim to 35 words)
+    const words = reply.trim().split(/\s+/);
+    if (words.length > 35) reply = words.slice(0, 35).join(" ");
+    // Optionally, if too short (<15 words) you can leave it or add a filler—but here we leave it as is
 
-    // Save user message in chat history
+    // Save user message (even if skipped messages are stored separately, we store all here)
     await dbRun("INSERT INTO chat_messages (user, content) VALUES (?, ?)", [userId, userMessage]);
     // Update user behavior data
-    await dbRun("INSERT OR IGNORE INTO user_data (user_id, behavior) VALUES (?, ?)", [userId, '{"interactions":0}']);
+    await dbRun(
+      "INSERT OR IGNORE INTO user_data (user_id, behavior) VALUES (?, ?)",
+      [userId, '{"interactions":0}']
+    );
     await dbRun(
       "UPDATE user_data SET behavior = json_set(behavior, '$.interactions', (json_extract(behavior, '$.interactions') + 1)) WHERE user_id = ?",
       [userId]
     );
     return reply;
   } catch (error) {
-    logError(error);
+    console.error("❌ Gemini API Error:", error);
     return "yo my brain glitched, try again 💀";
   }
 }
 
 // -------------------------
-// Conversation Skip Logic Function
+// Conversation & Skip Logic Functions
 // -------------------------
 function shouldReply(message) {
-  try {
-    // If replying to a bot message, 90% chance to respond.
-    if (message.reference?.messageId && botMessageIds.has(message.reference.messageId)) {
-      return Math.random() < 0.90;
-    }
-
-    const lowerContent = message.content.toLowerCase();
-    // If message mentions bot name, 95% chance.
-    if (lowerContent.includes(botName)) return Math.random() < 0.95;
-
-    // If greeting detected, 60% chance.
-    const greetings = ["yo", "hey", "hi", "hello", "noobhay"];
-    if (greetings.some((g) => lowerContent.startsWith(g) || lowerContent.includes(` ${g} `)))
-      return Math.random() < 0.60;
-
-    // Conversation tracking: count messages per channel and track participants.
-    const channelId = message.channel.id;
-    if (!conversationTracker.has(channelId)) {
-      conversationTracker.set(channelId, { count: 0, participants: new Set() });
-    }
-    const tracker = conversationTracker.get(channelId);
-    tracker.count++;
-    tracker.participants.add(message.author.id);
-
-    // For one-person conversation, set skip chance to 20%; for group chats, 10%.
-    const skipThreshold = tracker.participants.size > 1 ? 2 : 1;
-    if (tracker.count < skipThreshold) return false;
-    const chanceNotReply = tracker.participants.size > 1 ? 0.10 : 0.20;
-    tracker.count = 0; // reset after threshold
-    return Math.random() >= chanceNotReply;
-  } catch (error) {
-    logError(error);
-    return false;
+  // If message is a reply to one of the bot's messages, 90% chance to respond.
+  if (message.reference?.messageId && botMessageIds.has(message.reference.messageId)) {
+    return Math.random() < 0.90;
   }
+  
+  const lower = message.content.toLowerCase();
+  // If message mentions bot name, 95% chance.
+  if (lower.includes(botName)) return Math.random() < 0.95;
+  
+  // If greeting is detected ("yo", "hey", "hi", "hello", "noobhay"), 60% chance.
+  const greetings = ["yo", "hey", "hi", "hello", "noobhay"];
+  if (greetings.some(g => lower.startsWith(g) || lower.includes(` ${g} `))) return Math.random() < 0.60;
+  
+  // Conversation tracking: store and count all messages even if skipped.
+  const channelId = message.channel.id;
+  if (!conversationTracker.has(channelId)) conversationTracker.set(channelId, { count: 0, participants: new Set() });
+  const tracker = conversationTracker.get(channelId);
+  tracker.count++;
+  tracker.participants.add(message.author.id);
+  const skipThreshold = tracker.participants.size > 1 ? 2 : 1;
+  if (tracker.count < skipThreshold) return false;
+  // For solo conversations, use a 20% chance to skip (and 10% for multi-person)
+  const chanceNotReply = tracker.participants.size > 1 ? 0.10 : 0.20;
+  tracker.count = 0; // reset counter after threshold
+  return Math.random() >= chanceNotReply;
 }
 
 // -------------------------
-// Main Message Handler
+// Discord Message Handler
 // -------------------------
 client.on("messageCreate", async (message) => {
   try {
-    if (message.author.bot || !chatting) return;
-    lastMessageTime = Date.now();
+    if (message.author.bot) return;
+    
+    // Always store every user message for full conversation history (1-year retention)
+    await dbRun("INSERT INTO chat_messages (user, content) VALUES (?, ?)", [message.author.id, message.content]);
 
-    // 10% chance to send a meme or gif if trigger words are present
+    if (!chatting) return; // if bot is not in chatting mode, just log messages
+
+    // 10% chance to send a meme or gif if trigger words are found
     const triggers = ["meme", "funny", "gif"];
-    if (triggers.some((t) => message.content.toLowerCase().includes(t)) && Math.random() < 0.10) {
+    if (triggers.some(t => message.content.toLowerCase().includes(t)) && Math.random() < 0.10) {
       if (Math.random() < 0.5) {
         const meme = await getRandomMeme();
-        message.channel.send(meme).catch(logError);
+        message.channel.send(meme).catch(err => console.error("Send error:", err));
       } else {
         const gif = await getRandomGif("funny");
-        if (gif) message.channel.send(gif).catch(logError);
+        if (gif) message.channel.send(gif).catch(err => console.error("Send error:", err));
       }
       return;
     }
 
+    // Decide if we should reply based on conversation logic
     if (!shouldReply(message)) return;
 
-    // Use display name if available, else username
-    const displayName = message.member?.displayName || message.author.username;
-    const replyContent = await chatWithGemini(message.author.id, displayName, message.content);
+    const replyContent = await chatWithGemini(message.author.id, message.content);
     if (replyContent === lastReply) return;
     lastReply = replyContent;
-
-    // Append a random emoji
+    
     const emoji = getRandomEmoji(message);
     const finalReply = `${replyContent} ${emoji}`;
-
-    // Send reply and track message id
-    message.channel.send(finalReply).then((sentMsg) => {
-      botMessageIds.add(sentMsg.id);
-      setTimeout(() => botMessageIds.delete(sentMsg.id), 3600000);
-    }).catch(logError);
+    
+    message.channel.send(finalReply)
+      .then(sentMsg => {
+        botMessageIds.add(sentMsg.id);
+        // Remove bot message id after 1 hour
+        setTimeout(() => botMessageIds.delete(sentMsg.id), 3600000);
+      })
+      .catch(err => console.error("Send error:", err));
   } catch (error) {
-    logError(error);
+    console.error("❌ Message Handler Error:", error);
   }
 });
 
@@ -355,7 +269,16 @@ client.on("messageCreate", async (message) => {
 client.on("interactionCreate", async (interaction) => {
   try {
     if (!interaction.isCommand()) return;
-
+    
+    const startReplies = [
+      "ayyy i'm awake 💀", "yo wassup 😎", "ready to chat, let's go! 🔥", "oh, finally someone noticed me 😤",
+      "let's get this bread 💯", "imma get started now 🔥", "yo, i'm here 👀", "sup, i'm online 💀"
+    ];
+    const stopReplies = [
+      "fine, i'm out 💀", "peace out losers ✌️", "later, nerds 👋", "imma dip now 😤",
+      "bye, don't miss me 😏", "i'm ghosting y'all 💀", "adios, suckas ✌️"
+    ];
+    
     if (interaction.commandName === "start") {
       if (chatting) {
         await interaction.reply(getRandomElement(startReplies) + " " + getRandomEmoji(interaction));
@@ -368,12 +291,7 @@ client.on("interactionCreate", async (interaction) => {
       await interaction.reply(getRandomElement(stopReplies) + " " + getRandomEmoji(interaction));
     }
   } catch (error) {
-    logError(error);
-    try {
-      await interaction.reply("an error occurred, try again later.");
-    } catch (e) {
-      logError(e);
-    }
+    console.error("❌ Interaction Error:", error);
   }
 });
 
@@ -381,11 +299,21 @@ client.on("interactionCreate", async (interaction) => {
 // Express Server for Uptime Monitoring
 // -------------------------
 const app = express();
-const PORT = process.env.PORT || 3000;
+const port = PORT || 3000;
 app.get("/", (req, res) => res.send("noobhay tripathi is alive! 🚀"));
-app.listen(PORT, () => console.log(`✅ Web server running on port ${PORT}`));
+app.listen(port, () => console.log(`✅ web server running on port ${port}`));
+
+// -------------------------
+// Global Error Handlers
+// -------------------------
+process.on('unhandledRejection', error => {
+  console.error('Unhandled promise rejection:', error);
+});
+process.on('uncaughtException', error => {
+  console.error('Uncaught exception:', error);
+});
 
 // -------------------------
 // Log In the Bot
 // -------------------------
-client.login(DISCORD_TOKEN).catch(logError);
+client.login(DISCORD_TOKEN).catch(err => console.error("❌ Discord Login Error:", err));
