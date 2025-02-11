@@ -1,0 +1,22 @@
+{
+  "name": "discord-bot",
+  "version": "1.0.0",
+  "description": "A Discord bot that fetches memes, GIFs, and responds with Gen Z slang, learns user behavior, and more.",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^7.4.3",
+    "discord.js": "^14.5.0",
+    "dotenv": "^16.0.3",
+    "node-fetch": "^3.2.1",
+    "openai": "^3.1.0"
+  },
+  "devDependencies": {},
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "author": "geno",
+  "license": "MIT"
+}
