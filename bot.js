@@ -6,7 +6,10 @@ import dotenv from "dotenv";
 import express from "express";
 
 dotenv.config();
-const { DISCORD_TOKEN, DISCORD_CLIENT_ID, GEMINI_API_KEY, TENOR_API_KEY, PORT } = process.env;
+const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const TENOR_API_KEY = process.env.TENOR_API_KEY;
+const PORT = process.env.PORT || 3000;
 
 // -------------------------
 // Database Setup & Helpers
@@ -32,12 +35,13 @@ const dbRun = (query, params = []) =>
     });
   });
 
-// Create tables for chat history, user data, and mood
+// Create necessary tables
 db.serialize(() => {
   db.run(`CREATE TABLE IF NOT EXISTS chat_messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT, 
     user TEXT, 
     content TEXT, 
+    skipped INTEGER DEFAULT 0,
     timestamp TEXT DEFAULT (datetime('now', 'localtime'))
   );`);
   db.run(`CREATE TABLE IF NOT EXISTS user_data (
@@ -46,42 +50,16 @@ db.serialize(() => {
   );`);
   db.run(`CREATE TABLE IF NOT EXISTS mood_data (
     user_id TEXT PRIMARY KEY, 
-    mood TEXT DEFAULT 'neutral'
+    mood TEXT DEFAULT 'roasting'
   );`);
 });
 
 // -------------------------
-// Gemini AI Setup & Instructions
+// Logging Helper
 // -------------------------
-const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-
-// Bot personality instructions updated as requested
-const botInstructions = `
-you are noobhay tripathi, a 14-year-old human who loves playing roblox and lives in india.
-you're a bit overweight and insecure but don’t give a flying shit.
-speak in lowercase using gen z slang; keep responses short (15-35 words), natural, and not too cringe.
-mix in occasional emojis (especially skulls) and use phrases like:
-"zigga open your eyes are you fockinh dumb", "you dumbahh", "bro you know you should kys",
-"hell nawh kys zigga", "yeah man idc about ts tbh 💀🙏", "stop yapping bitch ahh", "bruv ;-;", "i’ll touch you", "aight ima dip now", "get ou"
-ask questions sometimes and learn from the convo.
-`;
-
-// -------------------------
-// Discord Client Setup
-// -------------------------
-const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
-  partials: [Partials.Channel],
-});
-
-const botName = "noobhay tripathi";
-let chatting = false;
-let lastReply = "";
-const botMessageIds = new Set();
-
-// Conversation tracking per channel
-const conversationTracker = new Map();
+function logError(err) {
+  console.error(`[${new Date().toISOString()}] Error:`, err);
+}
 
 // -------------------------
 // Utility Functions
@@ -99,199 +77,389 @@ function getRandomEmoji(message) {
 }
 
 // -------------------------
-// Meme & GIF Functions with Better Error Handling
+// Conversation History Functions
 // -------------------------
-async function getRandomMeme() {
+async function getRecentChatHistory() {
   try {
-    const response = await fetch("https://www.reddit.com/r/memes/random.json", {
-      headers: { "User-Agent": "noobhay-tripathi-bot/1.0" }
-    });
-    if (!response.ok) throw new Error(`Reddit API error: ${response.status} ${response.statusText}`);
-    const data = await response.json();
-    return data[0]?.data?.children[0]?.data?.url || "couldn't fetch a meme, bruh";
-  } catch (error) {
-    console.error("❌ Meme Fetch Error:", error);
-    return "couldn't fetch a meme, bruh";
+    const rows = await dbQuery(
+      `SELECT content FROM chat_messages 
+       WHERE timestamp >= datetime('now', '-1 year') 
+       ORDER BY timestamp DESC LIMIT 25`
+    );
+    return rows.map(r => r.content).join("\n");
+  } catch (err) {
+    logError(err);
+    return "";
   }
 }
 
-async function getRandomGif(keyword) {
+async function searchChatHistory(query) {
   try {
-    // Using Tenor v1 endpoint for reliability
-    const response = await fetch(`https://g.tenor.com/v1/search?key=${TENOR_API_KEY}&q=${encodeURIComponent(keyword)}&limit=1`);
-    if (!response.ok) throw new Error(`Tenor API error: ${response.status} ${response.statusText}`);
-    const data = await response.json();
-    if (data.results && data.results.length > 0 && data.results[0].media && data.results[0].media[0]?.gif?.url) {
-      return data.results[0].media[0].gif.url;
-    }
-    throw new Error("No GIF results found");
-  } catch (error) {
-    console.error("❌ GIF Fetch Error:", error);
-    return "couldn't fetch a gif, bruh";
+    const likeQuery = `%${query}%`;
+    const rows = await dbQuery(
+      `SELECT content FROM chat_messages 
+       WHERE timestamp >= datetime('now', '-1 year') AND content LIKE ? 
+       ORDER BY timestamp DESC LIMIT 25`,
+      [likeQuery]
+    );
+    return rows.map(r => r.content).join("\n");
+  } catch (err) {
+    logError(err);
+    return "";
   }
 }
 
 // -------------------------
-// Gemini Chat Function with Year-Long Memory & History Search
+// Gemini AI Setup & Prompt
 // -------------------------
+const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+
+// Global mood variable (default "roasting")
+let currentMood = "roasting";
+
+// Gemini prompt includes current mood
+function getGeminiPrompt(userMessage, recentChat, similarChat) {
+  return `
+you are noobhay tripathi, a 14-year-old human living in india who loves playing roblox.
+your style is offensive, savage, and cool with a knack for roasting.
+your tone is direct, brutally honest and uses gen z slang.
+current mood: ${currentMood}.
+keep replies concise: 15 to 35 words, 1-2 sentences (max 5 sentences).
+learn from chat history and incorporate context.
+preset phrases if needed: "zigga open your eyes are you fockinh dumb", "you dumbahh", "bro you know you should kys", "hell nawh kys zigga", "yeah man idc about ts tbh 💀🙏", "stop yapping bitch ahh", "bruv ;-;", "i’ll touch you", "aight ima dip now", "get ou"
+recent conversation (last 1 year, up to 25 messages):
+${recentChat}
+similar past messages (if any):
+${similarChat}
+user: ${userMessage}
+reply (be savage, offensive, and cool, and ask a question sometimes):
+`;
+}
+
 async function chatWithGemini(userId, userMessage) {
   try {
-    // Retrieve the last 25 messages from the past year (ordered from oldest to newest)
-    const recentRows = await dbQuery(
-      "SELECT content FROM chat_messages WHERE timestamp >= datetime('now', '-365 days') ORDER BY id DESC LIMIT 25"
-    );
-    const recentChat = recentRows.reverse().map(r => r.content).join("\n");
+    const recentChat = await getRecentChatHistory();
+    const similarChat = await searchChatHistory(userMessage);
+    const prompt = getGeminiPrompt(userMessage, recentChat, similarChat);
+    const result = await model.generateContent(prompt);
+    let reply = result.response.text() || "uhhh, my brain glitched 💀";
 
-    // Search the entire year's history for a message that contains the whole line (if any)
-    const similarRows = await dbQuery(
-      "SELECT content FROM chat_messages WHERE timestamp >= datetime('now', '-365 days') AND content LIKE ? LIMIT 1",
-      [`%${userMessage}%`]
-    );
-    let similarContext = "";
-    if (similarRows.length > 0) {
-      similarContext = `\npreviously someone said: "${similarRows[0].content}"`;
+    // Split into sentences and ensure each sentence has no more than 40 words
+    reply = reply
+      .split(/[.!?]+/)
+      .filter(s => s.trim().length > 0)
+      .map(sentence => {
+        const words = sentence.trim().split(/\s+/);
+        return words.length > 40 ? words.slice(0, 40).join(" ") : sentence.trim();
+      })
+      .join(". ") + ".";
+      
+    // Limit overall reply to 35 words maximum
+    const totalWords = reply.split(/\s+/);
+    if (totalWords.length > 35) {
+      reply = totalWords.slice(0, 35).join(" ") + ".";
     }
 
-    // Build the prompt with all context
-    const prompt = `${botInstructions}
-recent conversation (last 25 msgs):
-${recentChat}
-new message from user: ${userMessage}${similarContext}
-reply (keep it natural with gen z slang, 15-35 words max, ask a question sometimes):`;
+    // Save user message in DB for future context
+    await dbRun("INSERT INTO chat_messages (user, content, skipped) VALUES (?, ?, ?)", [userId, userMessage, 0]);
+    await dbRun("INSERT OR IGNORE INTO user_data (user_id, behavior) VALUES (?, ?)", [userId, '{"interactions":0}']);
+    await dbRun("UPDATE user_data SET behavior = json_set(behavior, '$.interactions', (json_extract(behavior, '$.interactions') + 1)) WHERE user_id = ?", [userId]);
 
-    const result = await model.generateContent(prompt);
-    let reply = result.response.text() || "uhhh my brain lagged 💀";
-
-    // Enforce word count limits: max 35 words (if over, trim to 35 words)
-    const words = reply.trim().split(/\s+/);
-    if (words.length > 35) reply = words.slice(0, 35).join(" ");
-    // Optionally, if too short (<15 words) you can leave it or add a filler—but here we leave it as is
-
-    // Save user message (even if skipped messages are stored separately, we store all here)
-    await dbRun("INSERT INTO chat_messages (user, content) VALUES (?, ?)", [userId, userMessage]);
-    // Update user behavior data
-    await dbRun(
-      "INSERT OR IGNORE INTO user_data (user_id, behavior) VALUES (?, ?)",
-      [userId, '{"interactions":0}']
-    );
-    await dbRun(
-      "UPDATE user_data SET behavior = json_set(behavior, '$.interactions', (json_extract(behavior, '$.interactions') + 1)) WHERE user_id = ?",
-      [userId]
-    );
     return reply;
   } catch (error) {
-    console.error("❌ Gemini API Error:", error);
-    return "yo my brain glitched, try again 💀";
+    logError(error);
+    return "yo, my brain glitched, try again 💀";
   }
 }
 
 // -------------------------
-// Conversation & Skip Logic Functions
+// Conversation Skip & Tracking
 // -------------------------
+const conversationTracker = new Map(); // key: channel id -> { count, participants: Set, skipped: [] }
 function shouldReply(message) {
-  // If message is a reply to one of the bot's messages, 90% chance to respond.
-  if (message.reference?.messageId && botMessageIds.has(message.reference.messageId)) {
-    return Math.random() < 0.90;
-  }
-  
-  const lower = message.content.toLowerCase();
-  // If message mentions bot name, 95% chance.
-  if (lower.includes(botName)) return Math.random() < 0.95;
-  
-  // If greeting is detected ("yo", "hey", "hi", "hello", "noobhay"), 60% chance.
-  const greetings = ["yo", "hey", "hi", "hello", "noobhay"];
-  if (greetings.some(g => lower.startsWith(g) || lower.includes(` ${g} `))) return Math.random() < 0.60;
-  
-  // Conversation tracking: store and count all messages even if skipped.
   const channelId = message.channel.id;
-  if (!conversationTracker.has(channelId)) conversationTracker.set(channelId, { count: 0, participants: new Set() });
+  if (!conversationTracker.has(channelId)) {
+    conversationTracker.set(channelId, { count: 0, participants: new Set(), skipped: [] });
+  }
   const tracker = conversationTracker.get(channelId);
   tracker.count++;
   tracker.participants.add(message.author.id);
-  const skipThreshold = tracker.participants.size > 1 ? 2 : 1;
-  if (tracker.count < skipThreshold) return false;
-  // For solo conversations, use a 20% chance to skip (and 10% for multi-person)
+
+  // For group conversations, skip threshold = 2; for solo, threshold = 1.
+  if (tracker.count < (tracker.participants.size > 1 ? 2 : 1)) {
+    tracker.skipped.push(message.content);
+    return false;
+  }
+  // Chance not to reply: 10% for group, 20% for solo.
   const chanceNotReply = tracker.participants.size > 1 ? 0.10 : 0.20;
   tracker.count = 0; // reset counter after threshold
   return Math.random() >= chanceNotReply;
 }
 
 // -------------------------
-// Discord Message Handler
+// Preset Replies for Slash Commands (40 each)
+// -------------------------
+const startReplies = [
+  "ayyy, i'm up and spittin' fire, what's good?",
+  "yo, i'm live, ready to roast all day.",
+  "i'm awake and savage, let's get this chaos.",
+  "hey, i'm here to burn fools—buckle up.",
+  "i'm back, ready to dish out real talk.",
+  "yo, i'm in—prepare for a roast session.",
+  "i'm live, let's cut the crap and roast.",
+  "ayyy, time to get savage. who’s ready?",
+  "yo, i'm awake—bring on the burn.",
+  "i'm here, savage mode on—let's go.",
+  "ayyy, i'm up, ready to roast these clowns.",
+  "yo, i'm live and i ain't holdin' back.",
+  "i'm here to slice through the BS.",
+  "ayyy, i'm on—let the savage session begin.",
+  "yo, i'm awake, prepare for some real talk.",
+  "i'm live, ready to drop brutal truth.",
+  "ayyy, i'm up and feelin' extra savage today.",
+  "yo, i'm here to roast like there's no tomorrow.",
+  "i'm awake—time to serve some cold facts.",
+  "ayyy, i'm live—let the offensive fun begin.",
+  "yo, i'm up—ready to tear down the nonsense.",
+  "i'm here—let's roast with no mercy.",
+  "ayyy, i'm awake—ready to drop savage lines.",
+  "yo, i'm live—bring on the madness.",
+  "i'm here, time to roast. buckle up.",
+  "ayyy, i'm up and ready—let's get brutal.",
+  "yo, i'm live and i ain't holding back.",
+  "i'm awake—ready to bring the heat.",
+  "ayyy, i'm here—let the savage takeover begin.",
+  "yo, i'm live—here to offend.",
+  "i'm up—time for raw truth, no filter.",
+  "ayyy, i'm awake—straight into savage mode.",
+  "yo, i'm live—get ready for some raw truth.",
+  "i'm here—ready to roast with no apologies.",
+  "ayyy, i'm up—let's burn these clowns.",
+  "yo, i'm live—kick off the savage fest.",
+  "i'm awake—about to get offensive.",
+  "ayyy, i'm live—dropping brutal truth.",
+  "yo, i'm up—let the savage revolution start."
+];
+
+const spamStartReplies = [
+  "chill, i'm already live, no need to spam.",
+  "yo, relax—i'm already in savage mode.",
+  "hey, stop pressing /start, i'm here.",
+  "save your energy—i got this already.",
+  "dude, i got it—no spamming needed.",
+  "calm down, i'm up and roasting.",
+  "spamming /start won't wake me up more.",
+  "bro, i said i'm live—cut it out.",
+  "i'm already here, so stop the spam.",
+  "chill out, my savage mode is on.",
+  "yo, i heard you the first time.",
+  "save it—i'm already in action.",
+  "hey, no need to repeat yourself.",
+  "i'm live, no more /start please.",
+  "spamming won't make me any savager.",
+  "i'm already burning—relax.",
+  "stop hitting /start, i'm here.",
+  "dude, i already said i'm live.",
+  "i'm awake, no need to shout /start.",
+  "chill, i'm already in the game.",
+  "hey, i got it—i'm already up.",
+  "spamming won't make the roast hotter.",
+  "i'm live—no need for extra /start.",
+  "yo, i already said i'm ready.",
+  "save your spam—i'm on.",
+  "dude, i'm already in savage mode.",
+  "hey, quit it—i'm awake.",
+  "i'm here, no need to spam.",
+  "chill, message received loud and clear.",
+  "yo, i'm live—stop repeating.",
+  "dude, i'm already rocking this.",
+  "no more spamming—i'm here.",
+  "hey, i got the memo—i'm awake.",
+  "i'm live—relax, no more /start.",
+  "bro, spamming ain't cool.",
+  "stop it—i'm already in action.",
+  "chill out, i'm here—no need to spam."
+];
+
+const stopReplies = [
+  "alright, i'm out—catch you later.",
+  "peace out—i'm signing off.",
+  "i'm ghosting now, bye.",
+  "later—time to dip.",
+  "i'm done here, see ya.",
+  "catch you on the flip side.",
+  "i'm off, peace.",
+  "later—keep it savage.",
+  "i'm logging off, bye.",
+  "see ya—i'm out.",
+  "i'm bailing now, later.",
+  "peace—i'm out.",
+  "i'm out, don't miss me.",
+  "later, i gotta dip.",
+  "i'm signing off—peace out.",
+  "bye—i'm disappearing now.",
+  "i'm off—catch you later.",
+  "later—i'm ghosting.",
+  "i'm out—peace and love.",
+  "bye, i'm checking out.",
+  "i'm logging off—see ya.",
+  "peace out—i'm done.",
+  "i'm out—catch you on the flip.",
+  "later, i'm off.",
+  "i'm gone, peace.",
+  "bye—i'm fading away.",
+  "i'm signing off, later.",
+  "peace—i'm out now.",
+  "i'm leaving, see ya.",
+  "later—off to roast elsewhere.",
+  "i'm done, peace out.",
+  "bye—i'm out for now.",
+  "i'm off, take care.",
+  "peace out—i'm bouncing.",
+  "i'm out, see ya soon.",
+  "later—i'm done here.",
+  "i'm signing off, later.",
+  "peace, i'm out.",
+  "i'm leaving—catch you later.",
+  "bye, i'm done for now."
+];
+
+// -------------------------
+// Discord Client Setup
+// -------------------------
+const client = new Client({
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
+  partials: [Partials.Channel],
+});
+
+let chatting = false;
+let lastReply = "";
+let lastStartCommandTime = 0; // for spam detection on /start
+const START_SPAM_INTERVAL = 30000; // 30 seconds
+
+// -------------------------
+// Slash Commands Handling (/start, /stop, /mood)
+// -------------------------
+client.on("interactionCreate", async (interaction) => {
+  try {
+    if (!interaction.isCommand()) return;
+    const command = interaction.commandName;
+
+    if (command === "start") {
+      const now = Date.now();
+      // If /start is used within 30 seconds, use spamStartReplies
+      if (now - lastStartCommandTime < START_SPAM_INTERVAL) {
+        await interaction.reply(getRandomElement(spamStartReplies) + " " + getRandomElement(["💀", "😎", "🔥"]));
+      } else {
+        // Even after 30 seconds, we still reply with a savage tone from startReplies
+        await interaction.reply(getRandomElement(startReplies) + " " + getRandomElement(["💀", "😎", "🔥"]));
+      }
+      lastStartCommandTime = now;
+      chatting = true;
+    } else if (command === "stop") {
+      chatting = false;
+      await interaction.reply(getRandomElement(stopReplies) + " " + getRandomElement(["💀", "😎", "🔥"]));
+    } else if (command === "mood") {
+      // /mood command can either show the current mood or set a new mood
+      const moodArg = interaction.options.getString("mood");
+      const validMoods = ["roasting", "neutral", "happy", "sad", "romantic", "rizz", "villain arc", "chill guy"];
+      if (moodArg) {
+        if (validMoods.includes(moodArg.toLowerCase())) {
+          currentMood = moodArg.toLowerCase();
+          // Optionally, update in DB for persistent mood per user
+          await dbRun("INSERT OR REPLACE INTO mood_data (user_id, mood) VALUES (?, ?)", [interaction.user.id, currentMood]);
+          await interaction.reply(`mood set to ${currentMood} 😎`);
+        } else {
+          await interaction.reply(`invalid mood. valid moods are: ${validMoods.join(", ")}`);
+        }
+      } else {
+        await interaction.reply(`current mood is ${currentMood} 😎`);
+      }
+    }
+  } catch (error) {
+    logError(error);
+    try {
+      if (interaction.deferred || interaction.replied) {
+        await interaction.followUp("an error occurred 😤");
+      } else {
+        await interaction.reply("an error occurred 😤");
+      }
+    } catch (err) {
+      logError(err);
+    }
+  }
+});
+
+// -------------------------
+// Main Message Handler
 // -------------------------
 client.on("messageCreate", async (message) => {
   try {
     if (message.author.bot) return;
-    
-    // Always store every user message for full conversation history (1-year retention)
-    await dbRun("INSERT INTO chat_messages (user, content) VALUES (?, ?)", [message.author.id, message.content]);
+    // Always store incoming messages for context and learning
+    await dbRun("INSERT INTO chat_messages (user, content, skipped) VALUES (?, ?, ?)", [message.author.id, message.content, 0]);
 
-    if (!chatting) return; // if bot is not in chatting mode, just log messages
+    if (!chatting) return;
 
-    // 10% chance to send a meme or gif if trigger words are found
+    // 10% chance to respond with a meme or gif if trigger words are detected
     const triggers = ["meme", "funny", "gif"];
     if (triggers.some(t => message.content.toLowerCase().includes(t)) && Math.random() < 0.10) {
       if (Math.random() < 0.5) {
-        const meme = await getRandomMeme();
-        message.channel.send(meme).catch(err => console.error("Send error:", err));
+        const meme = await (async () => {
+          try {
+            const response = await fetch("https://www.reddit.com/r/memes/random.json", {
+              headers: { "User-Agent": "noobhay-tripathi-bot/1.0" }
+            });
+            if (!response.ok) throw new Error(`Reddit API Error: ${response.status}`);
+            const data = await response.json();
+            return data[0]?.data?.children[0]?.data?.url || "couldn't fetch a meme, bruh";
+          } catch (err) {
+            logError(err);
+            return "couldn't fetch a meme, bruh";
+          }
+        })();
+        message.channel.send(meme);
       } else {
-        const gif = await getRandomGif("funny");
-        if (gif) message.channel.send(gif).catch(err => console.error("Send error:", err));
+        const gif = await (async () => {
+          try {
+            const url = `https://g.tenor.com/v1/search?q=${encodeURIComponent("funny")}&key=${TENOR_API_KEY}&limit=1`;
+            const response = await fetch(url);
+            if (!response.ok) throw new Error(`Tenor API Error: ${response.status}`);
+            const data = await response.json();
+            if (data.results && data.results.length > 0) {
+              return data.results[0].media[0]?.gif?.url || "couldn't fetch a gif, bruh";
+            } else {
+              throw new Error("No GIF results found.");
+            }
+          } catch (err) {
+            logError(err);
+            return "couldn't fetch a gif, bruh";
+          }
+        })();
+        message.channel.send(gif);
       }
       return;
     }
 
-    // Decide if we should reply based on conversation logic
+    // Decide whether to reply based on conversation tracking
     if (!shouldReply(message)) return;
 
     const replyContent = await chatWithGemini(message.author.id, message.content);
     if (replyContent === lastReply) return;
     lastReply = replyContent;
-    
+
+    // Append one random emoji (not spammy)
     const emoji = getRandomEmoji(message);
     const finalReply = `${replyContent} ${emoji}`;
-    
-    message.channel.send(finalReply)
-      .then(sentMsg => {
-        botMessageIds.add(sentMsg.id);
-        // Remove bot message id after 1 hour
-        setTimeout(() => botMessageIds.delete(sentMsg.id), 3600000);
-      })
-      .catch(err => console.error("Send error:", err));
-  } catch (error) {
-    console.error("❌ Message Handler Error:", error);
-  }
-});
 
-// -------------------------
-// Slash Commands (/start and /stop)
-// -------------------------
-client.on("interactionCreate", async (interaction) => {
-  try {
-    if (!interaction.isCommand()) return;
+    // Limit to maximum of 5 sentences
+    const sentences = finalReply.split(/[.!?]+/).filter(s => s.trim().length > 0);
+    const limitedReply = sentences.slice(0, 5).join(". ") + ".";
     
-    const startReplies = [
-      "ayyy i'm awake 💀", "yo wassup 😎", "ready to chat, let's go! 🔥", "oh, finally someone noticed me 😤",
-      "let's get this bread 💯", "imma get started now 🔥", "yo, i'm here 👀", "sup, i'm online 💀"
-    ];
-    const stopReplies = [
-      "fine, i'm out 💀", "peace out losers ✌️", "later, nerds 👋", "imma dip now 😤",
-      "bye, don't miss me 😏", "i'm ghosting y'all 💀", "adios, suckas ✌️"
-    ];
-    
-    if (interaction.commandName === "start") {
-      if (chatting) {
-        await interaction.reply(getRandomElement(startReplies) + " " + getRandomEmoji(interaction));
-        return;
-      }
-      chatting = true;
-      await interaction.reply(getRandomElement(startReplies) + " " + getRandomEmoji(interaction));
-    } else if (interaction.commandName === "stop") {
-      chatting = false;
-      await interaction.reply(getRandomElement(stopReplies) + " " + getRandomEmoji(interaction));
-    }
+    message.channel.send(limitedReply).catch(err => logError(err));
   } catch (error) {
-    console.error("❌ Interaction Error:", error);
+    logError(error);
   }
 });
 
@@ -299,21 +467,10 @@ client.on("interactionCreate", async (interaction) => {
 // Express Server for Uptime Monitoring
 // -------------------------
 const app = express();
-const port = PORT || 3000;
 app.get("/", (req, res) => res.send("noobhay tripathi is alive! 🚀"));
-app.listen(port, () => console.log(`✅ web server running on port ${port}`));
-
-// -------------------------
-// Global Error Handlers
-// -------------------------
-process.on('unhandledRejection', error => {
-  console.error('Unhandled promise rejection:', error);
-});
-process.on('uncaughtException', error => {
-  console.error('Uncaught exception:', error);
-});
+app.listen(PORT, () => console.log(`✅ Web server running on port ${PORT}`));
 
 // -------------------------
 // Log In the Bot
 // -------------------------
-client.login(DISCORD_TOKEN).catch(err => console.error("❌ Discord Login Error:", err));
+client.login(DISCORD_TOKEN).catch(err => logError(err));
