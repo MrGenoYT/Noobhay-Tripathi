@@ -1,23 +1,23 @@
 {
   "name": "noobhay-tripathi-bot",
   "version": "1.0.0",
-  "description": "A realistic Discord bot using Gemini AI, memes, GIFs, and adaptive learning.",
+  "description": "A Gen Z cringe Discord bot with infinite memory, GIFs, memes, moods, and human-like behavior.",
   "main": "bot.js",
+  "type": "module",
   "scripts": {
     "start": "node bot.js"
   },
   "dependencies": {
+    "@google/generative-ai": "^1.0.0",
     "discord.js": "^14.11.0",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
-    "@google/generative-ai": "^1.0.5",
-    "node-fetch": "^2.6.7",
+    "node-fetch": "^2.6.14",
     "sqlite3": "^5.1.6"
   },
   "engines": {
     "node": ">=16.0.0"
   },
-  "keywords": ["discord", "bot", "gemini-ai", "tenor", "memes", "adaptive-learning"],
   "author": "Noobhay Tripathi",
   "license": "MIT"
 }
