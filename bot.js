@@ -91,21 +91,9 @@ async function chatWithGemini(userId, userMessage) {
     const chatHistory = await dbQuery("SELECT content FROM chat_messages WHERE timestamp >= datetime('now', '-3 days') ORDER BY timestamp DESC LIMIT 50");
     const userBehavior = (await dbQuery("SELECT behavior FROM user_data WHERE user_id = ?", [userId]))[0]?.behavior || "{}";
 
-    const systemInstructions = `
-      You are a friendly, human-like Discord bot named ${botName}. Follow these rules:
-      1. Respond casually, using Gen Z slang when appropriate.
-      2. Your replies must feel short, natural, and human-like.
-      3. Never provide sources or external references.
-      4. Your responses should not exceed 50 words.
-      5. If the bot is not "chatting", do not respond.
-      6. Do not act like a typical bot. Your goal is to interact like a real person, not a machine.
-      7. Be mindful of tone, humor, and language — keep it informal.
-      8. For every message, use your knowledge of previous interactions to maintain context, but avoid over-explaining.
-
-    User's message: ${userMessage}
-    `;
-
-    const result = await model.generateContent(systemInstructions);
+    const prompt = `You are a friendly Discord bot named Noobhay Tripathi. Respond in a human-like way, using casual, short replies with Gen Z slang. Keep sentences under 50 words. If unsure, reply simply and avoid long explanations. User: ${userMessage}`;
+    
+    const result = await model.generateContent(prompt);
     const reply = result.response.text() || "uhhh my brain lagged 💀";
 
     await dbRun("INSERT INTO chat_messages (user, content) VALUES (?, ?)", [userId, userMessage]);
@@ -122,16 +110,24 @@ client.on("messageCreate", async (message) => {
   lastMessageTime = Date.now();
   inactivityMessageSent = false;
 
+  // Greeting / Name Mention (50% chance to respond)
   if (Math.random() > 0.5 && message.content.toLowerCase().includes(botName.toLowerCase())) {
     return message.reply(await chatWithGemini(message.author.id, message.content));
   }
 
-  if (Math.random() < 0.25) {
+  // Meme/GIF Response (30% chance)
+  if (Math.random() < 0.3) {
     const gifUrl = await getRandomGif("funny");
     if (gifUrl) return message.reply(gifUrl);
   }
 
-  message.reply(await chatWithGemini(message.author.id, message.content));
+  // Skip for Realism (2-3 messages)
+  if (messageCounter >= messagesBeforeReply) {
+    messageCounter = 0;
+    message.reply(await chatWithGemini(message.author.id, message.content));
+  } else {
+    messageCounter++;
+  }
 });
 
 // Slash Commands
