@@ -2,10 +2,10 @@
   "name": "noobhay-tripathi-bot",
   "version": "1.0.0",
   "description": "A Discord bot with learning abilities, memes, GIFs, Gen Z slang, and more.",
-  "main": "index.js",
+  "main": "bot.js",
   "type": "module",
   "scripts": {
-    "start": "node index.js"
+    "start": "node bot.js"
   },
   "dependencies": {
     "discord.js": "^14.12.0",
@@ -19,6 +19,6 @@
     "node": ">=16.0.0"
   },
   "keywords": ["discord", "bot", "AI", "memes", "gif", "learning"],
-  "author": "Your Name",
+  "author": "geno",
   "license": "MIT"
 }
