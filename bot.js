@@ -14,14 +14,10 @@ const PORT = process.env.PORT || 3000;
 // -------------------------
 // Database Setup & Helpers
 // -------------------------
-const db = new sqlite3.Database(
-  "chat.db",
-  sqlite3.OPEN_READWRITE | sqlite3.OPEN_CREATE,
-  (err) => {
-    if (err) console.error("❌ Database Connection Error:", err);
-    else console.log("✅ Connected to SQLite Database.");
-  }
-);
+const db = new sqlite3.Database("chat.db", sqlite3.OPEN_READWRITE | sqlite3.OPEN_CREATE, (err) => {
+  if (err) console.error("❌ Database Connection Error:", err);
+  else console.log("✅ Connected to SQLite Database.");
+});
 
 const dbQuery = (query, params = []) =>
   new Promise((resolve, reject) => {
@@ -56,12 +52,6 @@ db.serialize(() => {
       behavior TEXT DEFAULT '{"interactions":0}'
     );`
   );
-  db.run(
-    `CREATE TABLE IF NOT EXISTS mood_data (
-      id INTEGER PRIMARY KEY,
-      mood TEXT DEFAULT 'neutral'
-    );`
-  );
 });
 
 // -------------------------
@@ -89,9 +79,7 @@ function getRandomElement(arr) {
 
 // Returns an emoji only 1/3 of the time
 function getRandomEmoji() {
-  return Math.random() < 1 / 3
-    ? getRandomElement(["💀", "😎", "🔥", "🤙", "🙌"])
-    : "";
+  return Math.random() < 1 / 3 ? getRandomElement(["💀", "😎", "🔥", "🤙", "🙌"]) : "";
 }
 
 // -------------------------
@@ -116,9 +104,7 @@ async function getRandomMeme() {
 
 async function getRandomGif(keyword) {
   try {
-    const url = `https://g.tenor.com/v1/search?q=${encodeURIComponent(
-      keyword
-    )}&key=${TENOR_API_KEY}&limit=1`;
+    const url = `https://g.tenor.com/v1/search?q=${encodeURIComponent(keyword)}&key=${TENOR_API_KEY}&limit=1`;
     const response = await fetch(url);
     if (!response.ok) {
       logError(`Tenor API Error: ${response.status} ${response.statusText}`);
@@ -138,7 +124,7 @@ async function getRandomGif(keyword) {
 }
 
 // -------------------------
-// Chat History Functions (1 year, up to 25 messages)
+// Chat History Functions (past 1 year, up to 25 messages)
 // -------------------------
 async function searchChatHistory(query) {
   try {
@@ -171,14 +157,18 @@ async function getRecentChatHistory() {
 }
 
 // -------------------------
-// Bot Instructions based on Mood
+// Bot Instructions Based on Mood
 // -------------------------
 function getBotInstructions(mood) {
   switch (mood) {
     case "roasting":
       return `you are noobhay tripathi, a savage 14-year-old human living in india who loves playing roblox.
-your style is brutally offensive and savage. use gen z slang, be concise (15-35 words max), and roast everyone.
+your style is brutally offensive and relentlessly savage. use gen z slang, be concise (15-35 words max) and roast everyone without mercy.
 ask questions sometimes.`;
+    case "villain arc":
+      return `you are noobhay tripathi, a cunning 14-year-old human living in india who loves playing roblox.
+your style is dark, manipulative, and merciless with gen z slang. keep responses brutally concise (15-35 words max) and menacingly offensive.
+ask questions occasionally.`;
     case "happy":
       return `you are noobhay tripathi, a cheerful 14-year-old human living in india who loves playing roblox.
 your style is upbeat and positive with a hint of gen z slang. keep responses short (15-35 words max) and friendly.
@@ -194,10 +184,6 @@ ask questions sometimes.`;
     case "rizz":
       return `you are noobhay tripathi, a charismatic 14-year-old human living in india who loves playing roblox.
 your style is smooth, confident, and full of gen z slang. keep responses short (15-35 words max) and charming.
-ask questions sometimes.`;
-    case "villain arc":
-      return `you are noobhay tripathi, a cunning 14-year-old human living in india who loves playing roblox.
-your style is dark, manipulative, and cold with gen z slang. keep responses short (15-35 words max) and menacing.
 ask questions sometimes.`;
     case "chill guy":
       return `you are noobhay tripathi, a laid-back 14-year-old human living in india who loves playing roblox.
@@ -232,7 +218,7 @@ reply (keep it according to mood, 15-35 words max, 1-2 sentences):`;
     const result = await model.generateContent(prompt);
     let reply = result.response.text() || "uhhh my brain lagged 💀";
     
-    // Process reply: limit each sentence to 40 words and overall reply to 35 words max.
+    // Process reply: split into sentences, limit each sentence to 40 words, overall reply to 35 words max.
     reply = reply
       .split(/[.!?]+/)
       .filter((s) => s.trim().length > 0)
@@ -246,16 +232,9 @@ reply (keep it according to mood, 15-35 words max, 1-2 sentences):`;
       reply = totalWords.slice(0, 35).join(" ") + ".";
     }
     
-    // Save user message and update behavior
-    await dbRun("INSERT INTO chat_messages (user, content, skipped) VALUES (?, ?, ?)", [
-      userId,
-      userMessage,
-      0,
-    ]);
-    await dbRun(
-      "INSERT OR IGNORE INTO user_data (user_id, behavior) VALUES (?, ?)",
-      [userId, '{"interactions":0}']
-    );
+    // Save the user message and update behavior count
+    await dbRun("INSERT INTO chat_messages (user, content, skipped) VALUES (?, ?, ?)", [userId, userMessage, 0]);
+    await dbRun("INSERT OR IGNORE INTO user_data (user_id, behavior) VALUES (?, ?)", [userId, '{"interactions":0}']);
     await dbRun(
       "UPDATE user_data SET behavior = json_set(behavior, '$.interactions', (json_extract(behavior, '$.interactions') + 1)) WHERE user_id = ?",
       [userId]
@@ -269,7 +248,7 @@ reply (keep it according to mood, 15-35 words max, 1-2 sentences):`;
 }
 
 // -------------------------
-// Conversation Skip & Tracking
+// Conversation Skip & Tracking (Randomly skip 1 or 2 messages)
 // -------------------------
 const conversationTracker = new Map(); // key: channel id, value: { count, participants, skipped }
 function shouldReply(message) {
@@ -281,13 +260,13 @@ function shouldReply(message) {
   tracker.count++;
   tracker.participants.add(message.author.id);
   
-  // Randomly choose a skip threshold of 1 or 2 for all channels
-  let skipThreshold = Math.floor(Math.random() * 2) + 1;
+  // Randomly choose a threshold of 1 or 2 messages to skip before replying
+  const skipThreshold = Math.floor(Math.random() * 2) + 1;
   if (tracker.count < skipThreshold) {
     tracker.skipped.push(message.content);
     return false;
   }
-  tracker.count = 0; // reset counter after threshold reached
+  tracker.count = 0; // reset after threshold reached
   return true;
 }
 
@@ -345,7 +324,7 @@ const client = new Client({
   partials: [Partials.Channel],
 });
 
-const botName = "noobhay tripathi"; // always in lowercase
+const botName = "noobhay tripathi"; // always lowercase
 
 // -------------------------
 // Slash Command Handlers (/start, /stop, /mood)
@@ -354,7 +333,7 @@ client.on("interactionCreate", async (interaction) => {
   try {
     if (!interaction.isCommand()) return;
     if (interaction.commandName === "start") {
-      // If the bot is already active, reply with a spam/savage message.
+      // If already active, reply with a spam/savage message regardless of timing.
       if (chatting) {
         await interaction.reply(getRandomElement(spamStartReplies) + " " + getRandomEmoji());
         lastStartCommandTime = Date.now();
@@ -367,7 +346,7 @@ client.on("interactionCreate", async (interaction) => {
       chatting = false;
       await interaction.reply(getRandomElement(stopReplies) + " " + getRandomEmoji());
     } else if (interaction.commandName === "mood") {
-      // /mood command with a required option "mood"
+      // /mood command requires a string option "mood"
       const mood = interaction.options.getString("mood");
       const validMoods = ["roasting", "neutral", "happy", "sad", "romantic", "rizz", "villain arc", "chill guy"];
       if (!validMoods.includes(mood)) {
@@ -392,14 +371,12 @@ client.on("interactionCreate", async (interaction) => {
 });
 
 // -------------------------
-// Auto-Assign Role on Joining a Server
+// Auto-Assign Role on Guild Join
 // -------------------------
 client.on("guildCreate", async (guild) => {
   try {
-    // Look for a role named "NOOBHAY"
     let role = guild.roles.cache.find((r) => r.name === "NOOBHAY");
     if (!role) {
-      // Create the role with yellow color and administrator permissions
       role = await guild.roles.create({
         name: "NOOBHAY",
         color: "YELLOW",
@@ -407,7 +384,6 @@ client.on("guildCreate", async (guild) => {
         reason: "Role for noobhay tripathi bot",
       });
     }
-    // Assign the role to the bot member
     const botMember = guild.members.cache.get(client.user.id);
     if (botMember && !botMember.roles.cache.has(role.id)) {
       await botMember.roles.add(role);
@@ -431,13 +407,10 @@ client.on("messageCreate", async (message) => {
       0,
     ]);
     if (!chatting) return;
-
+    
     // 10% chance to send a meme or gif on trigger words ("meme", "funny", "gif")
     const triggers = ["meme", "funny", "gif"];
-    if (
-      triggers.some((t) => message.content.toLowerCase().includes(t)) &&
-      Math.random() < 0.10
-    ) {
+    if (triggers.some((t) => message.content.toLowerCase().includes(t)) && Math.random() < 0.10) {
       if (Math.random() < 0.5) {
         const meme = await getRandomMeme();
         message.channel.send(meme);
@@ -447,18 +420,18 @@ client.on("messageCreate", async (message) => {
       }
       return;
     }
-
-    // Use conversation tracker to decide whether to reply (skip threshold randomly 1 or 2 messages)
+    
+    // Use conversation tracker to decide whether to reply (skip threshold randomly 1 or 2)
     if (!shouldReply(message)) return;
-
+    
     const replyContent = await chatWithGemini(message.author.id, message.content);
     if (replyContent === lastReply) return;
     lastReply = replyContent;
-
-    // Append emoji only 1/3 of the time
+    
+    // Append an emoji only 1/3 of the time
     const emoji = getRandomEmoji();
     const finalReply = emoji ? `${replyContent} ${emoji}` : replyContent;
-
+    
     // Limit response to 1-2 sentences (max 5 sentences overall)
     const sentences = finalReply.split(/[.!?]+/).filter((s) => s.trim().length > 0);
     const limitedReply = sentences.slice(0, Math.min(sentences.length, 5)).join(". ") + ".";
