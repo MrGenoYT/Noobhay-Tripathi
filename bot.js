@@ -250,7 +250,7 @@ function shouldReply(message) {
     tracker.skipped.push(message.content);
     return false;
   }
-  const chanceNotReply = tracker.participants.size > 1 ? 0.10 : 0.20;
+  const chanceNotReply = tracker.participants.size > 1 ? 2 : 1;
   tracker.count = 0; // reset after threshold
   return Math.random() >= chanceNotReply;
 }
