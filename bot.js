@@ -1,9 +1,9 @@
-import { Client, GatewayIntentBits, Partials } from 'discord.js';
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { Client, GatewayIntentBits, Partials, REST, Routes, SlashCommandBuilder } from 'discord.js';
 import fetch from 'node-fetch';
 import sqlite3 from 'sqlite3';
 import dotenv from 'dotenv';
 import express from 'express';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
 // Load environment variables
 dotenv.config();
@@ -38,14 +38,15 @@ const botName = "Noobhay Tripathi";
 let chatting = false;
 let lastMessageTime = Date.now();
 let inactivityMessageSent = false;
+const greetings = ["hi", "hello", "hey", "yo", "sup", "wassup", "greetings", "noobhay"];
 let messageCounter = 0;
 let messagesBeforeReply = Math.floor(Math.random() * 2) + 2;
 const startReplies = ["yo, i'm here.", "finally, someone woke me up.", "aight, let's chat.", "wassup?", "u called?"];
 const stopReplies = ["fine, i'll shut up.", "aight, peace.", "guess i'll stop talking then.", "smh, y'all no fun.", "ok, bye."];
 const spamReplies = ["bro chill, i'm already awake 💀", "u good? i'm already running.", "bruh stop spamming.", "i heard u the first time, relax."];
 
-// Gemini API Setup
-const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+// Gemini AI Setup
+const gemini = new GoogleGenerativeAI(GEMINI_API_KEY);
 
 // Database Helpers
 const dbQuery = (query, params = []) => new Promise((resolve, reject) => {
@@ -56,24 +57,18 @@ const dbRun = (query, params = []) => new Promise((resolve, reject) => {
   db.run(query, params, (err) => (err ? reject(err) : resolve()));
 });
 
-// AI Chat Function with Gemini
+// AI Chat Function
 async function chatWithGemini(userId, userMessage) {
   try {
     const chatHistory = await dbQuery("SELECT content FROM chat_messages WHERE timestamp >= datetime('now', '-3 days') ORDER BY timestamp DESC LIMIT 50");
     const userBehavior = (await dbQuery("SELECT behavior FROM user_data WHERE user_id = ?", [userId]))[0]?.behavior || "{}";
     const userMood = (await dbQuery("SELECT mood FROM mood_data WHERE user_id = ?", [userId]))[0]?.mood || "neutral";
 
-    const model = genAI.getGenerativeModel({ model: "gemini-pro" });
-    const chat = model.startChat();
-    const response = await chat.sendMessage({
-      contents: [{ role: "user", text: `You are ${botName}, a human, not a bot. User info: ${userBehavior}. Mood: ${userMood}. Chat history:\n${chatHistory.map(m => m.content).join("\n")}\nUser: ${userMessage}` }]
-    });
+    const chat = gemini.getGenerativeModel({ model: "gemini-pro" }).startChat();
+    const response = await chat.sendMessage(`You are ${botName}, a human. Mood: ${userMood}. Previous chats: ${chatHistory.map(m => m.content).join("\n")}. New message: ${userMessage}`);
 
     const reply = response.response.text() || "bruh, i’m having a stroke 💀";
     await dbRun("INSERT INTO chat_messages (user, content) VALUES (?, ?)", [userId, userMessage]);
-
-    if (reply.includes("sad")) await dbRun("INSERT INTO mood_data (user_id, mood) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET mood = ?", [userId, 'sad', 'sad']);
-    if (reply.includes("happy")) await dbRun("INSERT INTO mood_data (user_id, mood) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET mood = ?", [userId, 'happy', 'happy']);
 
     return reply;
   } catch (error) {
@@ -108,6 +103,19 @@ async function getRandomGif(keyword) {
   }
 }
 
+// Slash Command Handling
+client.on('interactionCreate', async (interaction) => {
+  if (!interaction.isCommand()) return;
+  if (interaction.commandName === 'start') {
+    if (chatting) return interaction.reply(spamReplies[Math.floor(Math.random() * spamReplies.length)]);
+    chatting = true;
+    interaction.reply(startReplies[Math.floor(Math.random() * startReplies.length)]);
+  } else if (interaction.commandName === 'stop') {
+    chatting = false;
+    interaction.reply(stopReplies[Math.floor(Math.random() * stopReplies.length)]);
+  }
+});
+
 // Message Handling
 client.on('messageCreate', async (message) => {
   if (message.author.bot || !chatting) return;
@@ -138,5 +146,4 @@ app.listen(PORT, () => {
   console.log(`✅ Web server running on port ${PORT}`);
 });
 
-// Start Bot
 client.login(DISCORD_TOKEN);
