@@ -1,13 +1,17 @@
-const { Client, GatewayIntentBits, Partials, REST, Routes, SlashCommandBuilder } = require('discord.js');
-const fetch = require('node-fetch');
-const Database = require('better-sqlite3');
-require('dotenv').config();
+import { Client, GatewayIntentBits, Partials, REST, Routes, SlashCommandBuilder } from 'discord.js';
+import { OpenAI } from 'openai';
+import fetch from 'node-fetch';
+import Database from 'better-sqlite3';
+import dotenv from 'dotenv';
+
+// Load environment variables
+dotenv.config();
 
 // API Keys & Bot Info
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.DISCORD_CLIENT_ID;
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const TENOR_API_KEY = process.env.TENOR_API_KEY;
+const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;  // Use DeepSeek API Key here
+const TENOR_API_KEY = process.env.TENOR_API_KEY;  // Tenor API Key for GIFs
 
 // Database Setup for Infinite Memory & Learning Behavior
 const db = new Database('chat.db');
@@ -39,6 +43,12 @@ const greetings = ["hi", "hello", "hey", "yo", "sup", "wassup", "greetings", "no
 let messageCounter = 0;
 let messagesBeforeReply = Math.floor(Math.random() * 2) + 2;
 
+// DeepSeek Setup
+const openai = new OpenAI({
+    baseURL: 'https://api.deepseek.com',  // DeepSeek base URL
+    apiKey: DEEPSEEK_API_KEY
+});
+
 // Slash Commands Setup
 const commands = [
     new SlashCommandBuilder().setName('start').setDescription('Starts the bot chat'),
@@ -46,6 +56,7 @@ const commands = [
 ].map(cmd => cmd.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(DISCORD_TOKEN);
+
 client.once('ready', async () => {
     try {
         console.log('🚀 Registering slash commands...');
@@ -70,34 +81,25 @@ function saveUserBehavior(userId, behavior) {
       .run(userId, JSON.stringify(updated), JSON.stringify(updated));
 }
 
-// OpenAI Chat with Learning
-async function chatWithOpenAI(userId, userMessage) {
+// DeepSeek Chat with Learning
+async function chatWithDeepSeek(userId, userMessage) {
     const chatHistory = db.prepare("SELECT content FROM chat_messages ORDER BY timestamp DESC LIMIT 50").all().map(m => m.content);
     const userBehavior = getUserBehavior(userId);
 
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-            "Authorization": `Bearer ${OPENAI_API_KEY}`,
-            "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-            model: "gpt-4",
-            messages: [
-                {
-                    role: "system",
-                    content: `You are ${botName}, a human-like Discord bot that learns user behavior and improves responses over time. Your knowledge about this user: ${JSON.stringify(userBehavior)}`
-                },
-                ...chatHistory.map(m => ({ role: "user", content: m })),
-                { role: "user", content: userMessage }
-            ],
-            max_tokens: 150,
-            temperature: 0.8
-        })
+    // DeepSeek chat completion request
+    const completion = await openai.chat.completions.create({
+        model: "deepseek-chat",  // DeepSeek's chat model
+        messages: [
+            {
+                role: "system",
+                content: `You are ${botName}, a human-like Discord bot that learns user behavior and improves responses over time. Your knowledge about this user: ${JSON.stringify(userBehavior)}`
+            },
+            ...chatHistory.map(m => ({ role: "user", content: m })),
+            { role: "user", content: userMessage }
+        ]
     });
 
-    const data = await response.json();
-    const reply = data.choices?.[0]?.message?.content || "bruh, i’m having a stroke 💀";
+    const reply = completion.choices?.[0]?.message?.content || "bruh, i’m having a stroke 💀";
 
     // Learn new behavior from the conversation
     if (reply.includes("favorite topic")) {
@@ -108,18 +110,36 @@ async function chatWithOpenAI(userId, userMessage) {
     return reply;
 }
 
-// Get Random Meme
+// Get Random Meme from Reddit
 async function getRandomMeme() {
     const response = await fetch('https://www.reddit.com/r/memes/random.json');
     const data = await response.json();
     return data[0].data.children[0].data.url;
 }
 
-// Get Random GIF
+// Get Random GIF from Tenor
 async function getRandomGif(keyword) {
     const response = await fetch(`https://api.tenor.com/v1/search?q=${keyword}&key=${TENOR_API_KEY}&limit=1`);
     const data = await response.json();
     return data.results.length ? data.results[0].media[0].gif.url : null;
+}
+
+// Gen Z Slangs
+const genZSlangs = [
+    "sus", "slay", "bet", "lit", "cap", "no cap", "mood", "vibe", "stan", "simp", 
+    "yeet", "fam", "bussin", "woke", "fire", "clapback", "tea", "drag", "fr", "period", 
+    "slaps", "savage", "flex", "fyp", "lowkey", "highkey", "sksksk", "chill", "bruh", 
+    "litty", "ye", "glow up", "big yikes", "send it", "simping", "sick", "goated", "cheugy", 
+    "fit", "shook", "savage", "squad", "mood", "tbh", "fomo", "fangirl", "zaddy", "tbh", "hype", 
+    "bro", "dank", "slay", "clout", "rizz", "drag", "hundo p", "big brain", "sus", "catch flights"
+];
+
+// Handle Excitement & Moods (Uppercase for exclamations)
+function handleMood(messageContent) {
+    if (messageContent.includes("!")) {
+        return messageContent.toUpperCase();
+    }
+    return messageContent.toLowerCase();
 }
 
 // Slash Command Handling
@@ -145,8 +165,8 @@ client.on('messageCreate', async message => {
 
     // Instant Replies for Greetings (60% chance)
     if (greetings.includes(messageContent) && Math.random() > 0.4) {
-        const response = await chatWithOpenAI(message.author.id, messageContent);
-        return message.reply(response);
+        const response = await chatWithDeepSeek(message.author.id, messageContent);
+        return message.reply(handleMood(response));
     }
 
     messageCounter++;
@@ -163,8 +183,10 @@ client.on('messageCreate', async message => {
         if (gifUrl) return message.reply(gifUrl);
     }
 
-    const aiResponse = await chatWithOpenAI(message.author.id, message.content);
-    message.reply(aiResponse);
+    // Gen Z Slang
+    const genZResponse = genZSlangs[Math.floor(Math.random() * genZSlangs.length)];
+    const aiResponse = await chatWithDeepSeek(message.author.id, message.content);
+    message.reply(`${handleMood(aiResponse)} ${genZResponse}`);
 });
 
 // Inactivity Message
