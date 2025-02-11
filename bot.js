@@ -142,4 +142,18 @@ client.on('messageCreate', async (message) => {
   message.reply(await chatWithDeepSeek(message.author.id, message.content));
 });
 
+// Start Express server (Fix for Render)
+import express from 'express';
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.get('/', (req, res) => {
+  res.send('Noobhay Tripathi is alive! 🚀');
+});
+
+app.listen(PORT, () => {
+  console.log(`✅ Web server running on port ${PORT}`);
+});
+
 client.login(DISCORD_TOKEN);
