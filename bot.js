@@ -53,7 +53,7 @@ let inactivityMessageSent = false;
 let messageCounter = 0;
 let messagesBeforeReply = Math.floor(Math.random() * 2) + 2;
 
-// Replies & Memes
+// Responses & Memes
 const startReplies = ["ayyy i'm awake", "yo wassup 😎", "ready to chat, let's go!", "oh, finally someone noticed me!", "who woke me up??"];
 const stopReplies = ["fine, i'm out", "peace out losers ✌️", "guess i'm not wanted huh", "smh, no one loves me fr"];
 const spamReplies = ["BRO STOP SPAMMING 💀", "chill dude, i'm already here!", "yo wtf relax lmao"];
@@ -91,9 +91,7 @@ async function chatWithGemini(userId, userMessage) {
     const chatHistory = await dbQuery("SELECT content FROM chat_messages WHERE timestamp >= datetime('now', '-3 days') ORDER BY timestamp DESC LIMIT 50");
     const userBehavior = (await dbQuery("SELECT behavior FROM user_data WHERE user_id = ?", [userId]))[0]?.behavior || "{}";
 
-    const prompt = `You are a friendly Discord bot named Noobhay Tripathi. Respond in a human-like way, using casual, short replies with Gen Z slang. Keep sentences under 50 words. If unsure, reply simply and avoid long explanations. User: ${userMessage}`;
-    
-    const result = await model.generateContent(prompt);
+    const result = await model.generateContent(userMessage);
     const reply = result.response.text() || "uhhh my brain lagged 💀";
 
     await dbRun("INSERT INTO chat_messages (user, content) VALUES (?, ?)", [userId, userMessage]);
@@ -110,24 +108,19 @@ client.on("messageCreate", async (message) => {
   lastMessageTime = Date.now();
   inactivityMessageSent = false;
 
-  // Greeting / Name Mention (50% chance to respond)
-  if (Math.random() > 0.5 && message.content.toLowerCase().includes(botName.toLowerCase())) {
+  // Respond if tagged or mentions bot
+  if (Math.random() > 0.05 && message.content.toLowerCase().includes(botName.toLowerCase())) {
     return message.reply(await chatWithGemini(message.author.id, message.content));
   }
 
-  // Meme/GIF Response (30% chance)
-  if (Math.random() < 0.3) {
+  // 30% chance to send meme or GIF
+  if (Math.random() < 0.30) {
+    const memeUrl = await getRandomMeme();
     const gifUrl = await getRandomGif("funny");
-    if (gifUrl) return message.reply(gifUrl);
+    return memeUrl ? message.reply(memeUrl) : gifUrl ? message.reply(gifUrl) : null;
   }
 
-  // Skip for Realism (2-3 messages)
-  if (messageCounter >= messagesBeforeReply) {
-    messageCounter = 0;
-    message.reply(await chatWithGemini(message.author.id, message.content));
-  } else {
-    messageCounter++;
-  }
+  message.reply(await chatWithGemini(message.author.id, message.content));
 });
 
 // Slash Commands
