@@ -19,6 +19,15 @@ const db = new sqlite3.Database("chat.db", sqlite3.OPEN_READWRITE | sqlite3.OPEN
   else console.log("✅ Connected to SQLite Database.");
 });
 
+// Database Helper Functions
+const dbQuery = (query, params = []) => new Promise((resolve, reject) => {
+  db.all(query, params, (err, rows) => (err ? reject(err) : resolve(rows)));
+});
+
+const dbRun = (query, params = []) => new Promise((resolve, reject) => {
+  db.run(query, params, (err) => (err ? reject(err) : resolve()));
+});
+
 // Create tables
 db.serialize(() => {
   db.run(`CREATE TABLE IF NOT EXISTS chat_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT, content TEXT, timestamp TEXT DEFAULT (datetime('now', 'localtime')));`);
@@ -66,7 +75,7 @@ async function getRandomMeme() {
 // Fetch GIF
 async function getRandomGif(keyword) {
   try {
-    const response = await fetch(`https://api.tenor.com/v1/search?q=${keyword}&key=${TENOR_API_KEY}&limit=1`);
+    const response = await fetch(`https://tenor.googleapis.com/v2/search?q=${keyword}&key=${TENOR_API_KEY}&limit=1`);
     if (!response.ok) throw new Error(`Tenor API Error: ${response.statusText}`);
     const data = await response.json();
     return data.results.length ? data.results[0].media[0].gif.url : null;
