@@ -1,22 +1,22 @@
 {
-  "name": "discord-bot",
+  "name": "noobhay-tripathi-bot",
   "version": "1.0.0",
-  "description": "A Discord bot that fetches memes, GIFs, and responds with Gen Z slang, learns user behavior, and more.",
-  "main": "bot.js",
+  "description": "A human-like Discord bot with AI, memes, GIFs, Gen Z slangs, mood tracking, and infinite memory.",
+  "main": "index.js",
+  "type": "module",
   "scripts": {
-    "start": "node bot.js"
+    "start": "node index.js"
   },
   "dependencies": {
-    "better-sqlite3": "^7.4.3",
-    "discord.js": "^14.5.0",
-    "dotenv": "^16.0.3",
-    "node-fetch": "^3.2.1",
-    "openai": "^3.1.0"
+    "discord.js": "^14.11.0",
+    "openai": "^4.1.0",
+    "node-fetch": "^3.3.1",
+    "sqlite3": "^5.1.6",
+    "dotenv": "^16.3.1"
   },
-  "devDependencies": {},
   "engines": {
     "node": ">=16.0.0"
   },
-  "author": "geno",
+  "author": "Your Name",
   "license": "MIT"
 }
