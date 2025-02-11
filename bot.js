@@ -1,8 +1,9 @@
-import { Client, GatewayIntentBits, Partials, REST, Routes, SlashCommandBuilder } from 'discord.js';
-import { OpenAI } from 'openai';
+import { Client, GatewayIntentBits, Partials } from 'discord.js';
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import fetch from 'node-fetch';
 import sqlite3 from 'sqlite3';
 import dotenv from 'dotenv';
+import express from 'express';
 
 // Load environment variables
 dotenv.config();
@@ -10,7 +11,7 @@ dotenv.config();
 // API Keys & Bot Info
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.DISCORD_CLIENT_ID;
-const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const TENOR_API_KEY = process.env.TENOR_API_KEY;
 
 // Database Setup
@@ -37,15 +38,14 @@ const botName = "Noobhay Tripathi";
 let chatting = false;
 let lastMessageTime = Date.now();
 let inactivityMessageSent = false;
-const greetings = ["hi", "hello", "hey", "yo", "sup", "wassup", "greetings", "noobhay"];
 let messageCounter = 0;
 let messagesBeforeReply = Math.floor(Math.random() * 2) + 2;
 const startReplies = ["yo, i'm here.", "finally, someone woke me up.", "aight, let's chat.", "wassup?", "u called?"];
 const stopReplies = ["fine, i'll shut up.", "aight, peace.", "guess i'll stop talking then.", "smh, y'all no fun.", "ok, bye."];
 const spamReplies = ["bro chill, i'm already awake 💀", "u good? i'm already running.", "bruh stop spamming.", "i heard u the first time, relax."];
 
-// OpenAI DeepSeek Setup
-const openai = new OpenAI({ baseURL: 'https://api.deepseek.com', apiKey: DEEPSEEK_API_KEY });
+// Gemini API Setup
+const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 
 // Database Helpers
 const dbQuery = (query, params = []) => new Promise((resolve, reject) => {
@@ -56,23 +56,20 @@ const dbRun = (query, params = []) => new Promise((resolve, reject) => {
   db.run(query, params, (err) => (err ? reject(err) : resolve()));
 });
 
-// AI Chat Function
-async function chatWithDeepSeek(userId, userMessage) {
+// AI Chat Function with Gemini
+async function chatWithGemini(userId, userMessage) {
   try {
     const chatHistory = await dbQuery("SELECT content FROM chat_messages WHERE timestamp >= datetime('now', '-3 days') ORDER BY timestamp DESC LIMIT 50");
     const userBehavior = (await dbQuery("SELECT behavior FROM user_data WHERE user_id = ?", [userId]))[0]?.behavior || "{}";
     const userMood = (await dbQuery("SELECT mood FROM mood_data WHERE user_id = ?", [userId]))[0]?.mood || "neutral";
 
-    const completion = await openai.chat.completions.create({
-      model: "deepseek-chat",
-      messages: [
-        { role: "system", content: `you are ${botName}, a human, not a bot. user info: ${userBehavior}. mood: ${userMood}.` },
-        ...chatHistory.map(m => ({ role: "user", content: m.content })),
-        { role: "user", content: userMessage }
-      ]
+    const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+    const chat = model.startChat();
+    const response = await chat.sendMessage({
+      contents: [{ role: "user", text: `You are ${botName}, a human, not a bot. User info: ${userBehavior}. Mood: ${userMood}. Chat history:\n${chatHistory.map(m => m.content).join("\n")}\nUser: ${userMessage}` }]
     });
 
-    const reply = completion.choices?.[0]?.message?.content || "bruh, i’m having a stroke 💀";
+    const reply = response.response.text() || "bruh, i’m having a stroke 💀";
     await dbRun("INSERT INTO chat_messages (user, content) VALUES (?, ?)", [userId, userMessage]);
 
     if (reply.includes("sad")) await dbRun("INSERT INTO mood_data (user_id, mood) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET mood = ?", [userId, 'sad', 'sad']);
@@ -80,7 +77,7 @@ async function chatWithDeepSeek(userId, userMessage) {
 
     return reply;
   } catch (error) {
-    console.error("❌ deepseek api error:", error);
+    console.error("❌ gemini api error:", error);
     return "uh-oh, my brain glitched. try again later!";
   }
 }
@@ -111,19 +108,6 @@ async function getRandomGif(keyword) {
   }
 }
 
-// Slash Command Handling
-client.on('interactionCreate', async (interaction) => {
-  if (!interaction.isCommand()) return;
-  if (interaction.commandName === 'start') {
-    if (chatting) return interaction.reply(spamReplies[Math.floor(Math.random() * spamReplies.length)]);
-    chatting = true;
-    interaction.reply(startReplies[Math.floor(Math.random() * startReplies.length)]);
-  } else if (interaction.commandName === 'stop') {
-    chatting = false;
-    interaction.reply(stopReplies[Math.floor(Math.random() * stopReplies.length)]);
-  }
-});
-
 // Message Handling
 client.on('messageCreate', async (message) => {
   if (message.author.bot || !chatting) return;
@@ -131,7 +115,7 @@ client.on('messageCreate', async (message) => {
   inactivityMessageSent = false;
 
   if (Math.random() > 0.5 && message.content.toLowerCase().includes(botName.toLowerCase())) {
-    return message.reply(await chatWithDeepSeek(message.author.id, message.content));
+    return message.reply(await chatWithGemini(message.author.id, message.content));
   }
 
   if (Math.random() < 0.25) {
@@ -139,12 +123,10 @@ client.on('messageCreate', async (message) => {
     if (gifUrl) return message.reply(gifUrl);
   }
 
-  message.reply(await chatWithDeepSeek(message.author.id, message.content));
+  message.reply(await chatWithGemini(message.author.id, message.content));
 });
 
 // Start Express server (Fix for Render)
-import express from 'express';
-
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -156,4 +138,5 @@ app.listen(PORT, () => {
   console.log(`✅ Web server running on port ${PORT}`);
 });
 
+// Start Bot
 client.login(DISCORD_TOKEN);
