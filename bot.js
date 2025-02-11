@@ -1,7 +1,7 @@
 import { Client, GatewayIntentBits, Partials, REST, Routes, SlashCommandBuilder } from 'discord.js';
 import { OpenAI } from 'openai';
 import fetch from 'node-fetch';
-import Database from 'better-sqlite3';
+import sqlite3 from 'sqlite3';
 import dotenv from 'dotenv';
 
 // Load environment variables
@@ -10,28 +10,26 @@ dotenv.config();
 // API Keys & Bot Info
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.DISCORD_CLIENT_ID;
-const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;  // Use DeepSeek API Key here
-const TENOR_API_KEY = process.env.TENOR_API_KEY;  // Tenor API Key for GIFs
+const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
+const TENOR_API_KEY = process.env.TENOR_API_KEY;
 
-// Database Setup for Infinite Memory & Learning Behavior
-const db = new Database('chat.db');
-db.exec(`
-    CREATE TABLE IF NOT EXISTS chat_messages (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user TEXT,
-        content TEXT,
-        timestamp TEXT DEFAULT (datetime('now', 'localtime'))
-    );
-    CREATE TABLE IF NOT EXISTS user_data (
-        user_id TEXT PRIMARY KEY,
-        behavior TEXT DEFAULT '{}'
-    );
-`);
+// Database Setup
+const db = new sqlite3.Database('chat.db', sqlite3.OPEN_READWRITE | sqlite3.OPEN_CREATE, (err) => {
+  if (err) console.error('❌ database connection error:', err);
+  else console.log('✅ connected to sqlite database.');
+});
+
+// Create necessary tables
+db.serialize(() => {
+  db.run(`CREATE TABLE IF NOT EXISTS chat_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT, content TEXT, timestamp TEXT DEFAULT (datetime('now', 'localtime')));`);
+  db.run(`CREATE TABLE IF NOT EXISTS user_data (user_id TEXT PRIMARY KEY, behavior TEXT DEFAULT '{}');`);
+  db.run(`CREATE TABLE IF NOT EXISTS mood_data (user_id TEXT PRIMARY KEY, mood TEXT DEFAULT 'neutral');`);
+});
 
 // Client Setup
 const client = new Client({
-    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
-    partials: [Partials.Channel]
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
+  partials: [Partials.Channel]
 });
 
 // Bot Variables
@@ -42,164 +40,106 @@ let inactivityMessageSent = false;
 const greetings = ["hi", "hello", "hey", "yo", "sup", "wassup", "greetings", "noobhay"];
 let messageCounter = 0;
 let messagesBeforeReply = Math.floor(Math.random() * 2) + 2;
+const startReplies = ["yo, i'm here.", "finally, someone woke me up.", "aight, let's chat.", "wassup?", "u called?"];
+const stopReplies = ["fine, i'll shut up.", "aight, peace.", "guess i'll stop talking then.", "smh, y'all no fun.", "ok, bye."];
+const spamReplies = ["bro chill, i'm already awake 💀", "u good? i'm already running.", "bruh stop spamming.", "i heard u the first time, relax."];
 
-// DeepSeek Setup
-const openai = new OpenAI({
-    baseURL: 'https://api.deepseek.com',  // DeepSeek base URL
-    apiKey: DEEPSEEK_API_KEY
+// OpenAI DeepSeek Setup
+const openai = new OpenAI({ baseURL: 'https://api.deepseek.com', apiKey: DEEPSEEK_API_KEY });
+
+// Database Helpers
+const dbQuery = (query, params = []) => new Promise((resolve, reject) => {
+  db.all(query, params, (err, rows) => (err ? reject(err) : resolve(rows)));
 });
 
-// Slash Commands Setup
-const commands = [
-    new SlashCommandBuilder().setName('start').setDescription('Starts the bot chat'),
-    new SlashCommandBuilder().setName('stop').setDescription('Stops the bot chat')
-].map(cmd => cmd.toJSON());
-
-const rest = new REST({ version: '10' }).setToken(DISCORD_TOKEN);
-
-client.once('ready', async () => {
-    try {
-        console.log('🚀 Registering slash commands...');
-        await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
-        console.log('✅ Slash commands registered!');
-    } catch (error) {
-        console.error('❌ Error registering commands:', error);
-    }
-    console.log(`${botName} is online! 🚀`);
+const dbRun = (query, params = []) => new Promise((resolve, reject) => {
+  db.run(query, params, (err) => (err ? reject(err) : resolve()));
 });
 
-// Fetch & Save User Behavior
-function getUserBehavior(userId) {
-    const data = db.prepare("SELECT behavior FROM user_data WHERE user_id = ?").get(userId);
-    return data ? JSON.parse(data.behavior) : {};
-}
-
-function saveUserBehavior(userId, behavior) {
-    const existing = getUserBehavior(userId);
-    const updated = { ...existing, ...behavior };
-    db.prepare("INSERT INTO user_data (user_id, behavior) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET behavior = ?")
-      .run(userId, JSON.stringify(updated), JSON.stringify(updated));
-}
-
-// DeepSeek Chat with Learning
+// AI Chat Function
 async function chatWithDeepSeek(userId, userMessage) {
-    const chatHistory = db.prepare("SELECT content FROM chat_messages ORDER BY timestamp DESC LIMIT 50").all().map(m => m.content);
-    const userBehavior = getUserBehavior(userId);
+  try {
+    const chatHistory = await dbQuery("SELECT content FROM chat_messages WHERE timestamp >= datetime('now', '-3 days') ORDER BY timestamp DESC LIMIT 50");
+    const userBehavior = (await dbQuery("SELECT behavior FROM user_data WHERE user_id = ?", [userId]))[0]?.behavior || "{}";
+    const userMood = (await dbQuery("SELECT mood FROM mood_data WHERE user_id = ?", [userId]))[0]?.mood || "neutral";
 
-    // DeepSeek chat completion request
     const completion = await openai.chat.completions.create({
-        model: "deepseek-chat",  // DeepSeek's chat model
-        messages: [
-            {
-                role: "system",
-                content: `You are ${botName}, a human-like Discord bot that learns user behavior and improves responses over time. Your knowledge about this user: ${JSON.stringify(userBehavior)}`
-            },
-            ...chatHistory.map(m => ({ role: "user", content: m })),
-            { role: "user", content: userMessage }
-        ]
+      model: "deepseek-chat",
+      messages: [
+        { role: "system", content: `you are ${botName}, a human, not a bot. user info: ${userBehavior}. mood: ${userMood}.` },
+        ...chatHistory.map(m => ({ role: "user", content: m.content })),
+        { role: "user", content: userMessage }
+      ]
     });
 
     const reply = completion.choices?.[0]?.message?.content || "bruh, i’m having a stroke 💀";
+    await dbRun("INSERT INTO chat_messages (user, content) VALUES (?, ?)", [userId, userMessage]);
 
-    // Learn new behavior from the conversation
-    if (reply.includes("favorite topic")) {
-        userBehavior.favoriteTopic = userMessage;
-        saveUserBehavior(userId, userBehavior);
-    }
+    if (reply.includes("sad")) await dbRun("INSERT INTO mood_data (user_id, mood) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET mood = ?", [userId, 'sad', 'sad']);
+    if (reply.includes("happy")) await dbRun("INSERT INTO mood_data (user_id, mood) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET mood = ?", [userId, 'happy', 'happy']);
 
     return reply;
+  } catch (error) {
+    console.error("❌ deepseek api error:", error);
+    return "uh-oh, my brain glitched. try again later!";
+  }
 }
 
-// Get Random Meme from Reddit
+// Fetch Meme
 async function getRandomMeme() {
+  try {
     const response = await fetch('https://www.reddit.com/r/memes/random.json');
+    if (!response.ok) throw new Error(`reddit api error: ${response.statusText}`);
     const data = await response.json();
     return data[0].data.children[0].data.url;
+  } catch (error) {
+    console.error("❌ meme fetch error:", error);
+    return "couldn't find a meme, bro. try again later!";
+  }
 }
 
-// Get Random GIF from Tenor
+// Fetch GIF
 async function getRandomGif(keyword) {
+  try {
     const response = await fetch(`https://api.tenor.com/v1/search?q=${keyword}&key=${TENOR_API_KEY}&limit=1`);
+    if (!response.ok) throw new Error(`tenor api error: ${response.statusText}`);
     const data = await response.json();
     return data.results.length ? data.results[0].media[0].gif.url : null;
-}
-
-// Gen Z Slangs
-const genZSlangs = [
-    "sus", "slay", "bet", "lit", "cap", "no cap", "mood", "vibe", "stan", "simp", 
-    "yeet", "fam", "bussin", "woke", "fire", "clapback", "tea", "drag", "fr", "period", 
-    "slaps", "savage", "flex", "fyp", "lowkey", "highkey", "sksksk", "chill", "bruh", 
-    "litty", "ye", "glow up", "big yikes", "send it", "simping", "sick", "goated", "cheugy", 
-    "fit", "shook", "savage", "squad", "mood", "tbh", "fomo", "fangirl", "zaddy", "tbh", "hype", 
-    "bro", "dank", "slay", "clout", "rizz", "drag", "hundo p", "big brain", "sus", "catch flights"
-];
-
-// Handle Excitement & Moods (Uppercase for exclamations)
-function handleMood(messageContent) {
-    if (messageContent.includes("!")) {
-        return messageContent.toUpperCase();
-    }
-    return messageContent.toLowerCase();
+  } catch (error) {
+    console.error("❌ gif fetch error:", error);
+    return null;
+  }
 }
 
 // Slash Command Handling
-client.on('interactionCreate', async interaction => {
-    if (!interaction.isCommand()) return;
-
-    if (interaction.commandName === 'start') {
-        chatting = true;
-        return interaction.reply("Alright, I'm awake. Let's chat! 🤖");
-    } else if (interaction.commandName === 'stop') {
-        chatting = false;
-        return interaction.reply("Fine. I'll shut up. 😶");
-    }
+client.on('interactionCreate', async (interaction) => {
+  if (!interaction.isCommand()) return;
+  if (interaction.commandName === 'start') {
+    if (chatting) return interaction.reply(spamReplies[Math.floor(Math.random() * spamReplies.length)]);
+    chatting = true;
+    interaction.reply(startReplies[Math.floor(Math.random() * startReplies.length)]);
+  } else if (interaction.commandName === 'stop') {
+    chatting = false;
+    interaction.reply(stopReplies[Math.floor(Math.random() * stopReplies.length)]);
+  }
 });
 
 // Message Handling
-client.on('messageCreate', async message => {
-    if (message.author.bot || !chatting) return;
+client.on('messageCreate', async (message) => {
+  if (message.author.bot || !chatting) return;
+  lastMessageTime = Date.now();
+  inactivityMessageSent = false;
 
-    const messageContent = message.content.toLowerCase();
-    lastMessageTime = Date.now();
-    inactivityMessageSent = false;
+  if (Math.random() > 0.5 && message.content.toLowerCase().includes(botName.toLowerCase())) {
+    return message.reply(await chatWithDeepSeek(message.author.id, message.content));
+  }
 
-    // Instant Replies for Greetings (60% chance)
-    if (greetings.includes(messageContent) && Math.random() > 0.4) {
-        const response = await chatWithDeepSeek(message.author.id, messageContent);
-        return message.reply(handleMood(response));
-    }
+  if (Math.random() < 0.25) {
+    const gifUrl = await getRandomGif("funny");
+    if (gifUrl) return message.reply(gifUrl);
+  }
 
-    messageCounter++;
-    if (messageCounter < messagesBeforeReply) return;
-
-    if (Math.random() < 0.3) return;
-
-    messageCounter = 0;
-    messagesBeforeReply = Math.floor(Math.random() * 2) + 2;
-
-    // Meme/GIF Replies (25% chance)
-    if (Math.random() < 0.25) {
-        const gifUrl = await getRandomGif("funny");
-        if (gifUrl) return message.reply(gifUrl);
-    }
-
-    // Gen Z Slang
-    const genZResponse = genZSlangs[Math.floor(Math.random() * genZSlangs.length)];
-    const aiResponse = await chatWithDeepSeek(message.author.id, message.content);
-    message.reply(`${handleMood(aiResponse)} ${genZResponse}`);
+  message.reply(await chatWithDeepSeek(message.author.id, message.content));
 });
-
-// Inactivity Message
-setInterval(() => {
-    if (!chatting || inactivityMessageSent) return;
-    if (Date.now() - lastMessageTime > 45 * 60 * 1000) {
-        client.channels.cache.forEach(channel => {
-            if (channel.isTextBased()) {
-                channel.send("Yo, this place is deader than my social life. Someone say something 💀");
-                inactivityMessageSent = true;
-            }
-        });
-    }
-}, 60000);
 
 client.login(DISCORD_TOKEN);
