@@ -80,8 +80,6 @@ function getRandomEmoji() {
 const signatureLines = `
 ZIGGA OPEN YOUR EYES ARE YOU FOCKINH DUMB
 You dumbahh
-nigga
-fork you
 bro you know you should kys
 hell nawh kys zigga
 yeah man idc about ts tbh💀🙏
