@@ -593,5 +593,8 @@ client.on("messageCreate", async (message) => {
     console.error("message handler error:", error);
   }
 });
+const app = express();
+app.get("/", (req, res) => res.send("noobhay tripathi is alive! 🚀"));
+app.listen(PORT, () => console.log(`✅ web server running on port ${PORT}`));
 
 client.login(DISCORD_TOKEN);
