@@ -270,7 +270,8 @@ const basePhrases = [
   "bruv ;-;",
   "I'll touch you",
   "aight Ima dip now",
-  "GET OU",
+  "fork you",
+  "GET OU-",
 ];
 
 // ================================
