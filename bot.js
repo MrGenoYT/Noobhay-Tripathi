@@ -38,7 +38,7 @@ const dbRun = (query, params = []) =>
     });
   });
 
-// Create tables: chat_messages, user_data, mood_data
+// Create tables for chat_messages, user_data, and mood_data.
 db.serialize(() => {
   db.run(`CREATE TABLE IF NOT EXISTS chat_messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -68,29 +68,29 @@ function logError(err) {
 // Utility Functions & Presets
 // ================================
 
-// Random element picker.
+// Returns a random element from an array.
 function getRandomElement(arr) {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
-// Get a random emoji from a combined pool (includes frequently used ones).
+// Custom emoji pool: includes frequent emojis.
 function getRandomEmoji(message) {
-  let frequent = ["😎", "😂", "😭", "💀", "😔", "🔥", "🗿", "😈"];
   if (message?.guild && message.guild.emojis.cache.size > 0) {
-    const serverEmojis = Array.from(message.guild.emojis.cache.values()).map(e => e.toString());
-    return getRandomElement(serverEmojis.concat(frequent));
+    const custom = Array.from(message.guild.emojis.cache.values()).map(e => e.toString());
+    const frequent = ["😎", "😂", "😭", "💀", "😔", "🔥", "🗿", "😈"];
+    return getRandomElement(custom.concat(frequent));
   }
-  return getRandomElement(frequent);
+  return getRandomElement(["😎", "😂", "😭", "💀", "😔", "🔥", "🗿", "😈"]);
 }
 
-// Format a response: add an emoji per sentence based on mood probability.
-function formatResponse(rawResponse, mood) {
-  let emojiChance = 0.33;
-  if (["roasting", "villain arc"].includes(mood)) emojiChance = 0.66;
-  else if (mood === "chill guy") emojiChance = 0.25;
+// Formats a response by splitting into sentences and adding an emoji occasionally.
+function formatResponse(rawResponse, currentMood) {
+  let emojiChance = 0.33; // default 33%
+  if (["roasting", "villain arc"].includes(currentMood)) emojiChance = 0.66;
+  else if (currentMood === "chill guy") emojiChance = 0.25;
 
   const sentences = rawResponse.match(/[^.!?]+[.!?]*/g) || [rawResponse];
-  return sentences
+  const formatted = sentences
     .map(sentence => {
       sentence = sentence.trim();
       if (!sentence) return "";
@@ -101,13 +101,14 @@ function formatResponse(rawResponse, mood) {
     })
     .filter(s => s.length > 0)
     .join(" ");
+  return formatted;
 }
 
 // ================================
 // Preset Replies for Slash Commands
 // ================================
 
-// Reduced presets for /start.
+// Reduced presets for /start:
 const startRepliesEmoji = [
   "ayyy i'm awake, ready to wreck this chat 😈",
   "yo, i'm live—time to bring the heat 🔥",
@@ -120,22 +121,22 @@ const startRepliesNoEmoji = [
   "yo, i'm live—time to bring the heat",
   "woke up, now watch me roast these fools"
 ];
-// Reduced spam presets for /start (if spammed within 30 seconds).
+// Reduced presets for /start spam:
 const spamStartReplies = [
   "chill, i'm already live, dumbass",
   "save your breath, i’m awake already",
-  "stop spamming /start, idiot",
-  "i already said i'm live—zip it",
-  "enough already, i'm up"
+  "hey, stop spamming /start, idiot",
+  "i'm live, now zip it",
+  "enough already, i’m up"
 ];
 
-// Reduced presets for /stop.
+// Reduced presets for /stop:
 const stopRepliesEmoji = [
   "fine, i'm out, peace out 😈",
   "i’m done here, later bitch 🔥",
   "i’m ghosting, catch ya on the flip 💀",
   "i’m dipping now, bye 😎",
-  "bye, i'm out—don’t miss me 😈"
+  "time to dip, i'm out 😈"
 ];
 const stopRepliesNoEmoji = [
   "fine, i'm out, peace out",
@@ -143,71 +144,67 @@ const stopRepliesNoEmoji = [
   "i’m ghosting, catch ya on the flip"
 ];
 
-// Mood switch presets: 5 variations per mood.
+// Reduced mood presets (5 per mood):
 const moodPresets = {
   roasting: [
     "k mood switched to roasting 🔥",
-    "now we're in roast mode 🔥",
-    "roast mode on, get ready 🔥",
-    "mood set to roasting, idiot 🔥",
-    "time to roast, mood is roasting 🔥"
+    "roast mode: on, dumbass 🔥",
+    "now in roast mode, let's get savage 🔥",
+    "i'm roasting now, get ready 🔥",
+    "roast mode activated 🔥"
   ],
   neutral: [
-    "k mood switched to neutral.",
-    "mood set to neutral, i’ll listen now.",
-    "neutral mode activated.",
-    "i'm in neutral mode now.",
-    "mood is now neutral."
+    "mood set to neutral.",
+    "neutral mode on.",
+    "i'm in neutral mode.",
+    "mood switched to neutral.",
+    "back to basics: neutral."
   ],
   happy: [
-    "k mood switched to happy 😊",
+    "mood switched to happy 😊",
     "happy mode on, let's vibe!",
-    "mood set to happy, good vibes!",
-    "i'm feeling happy now!",
-    "mood changed to happy."
+    "i'm feeling happy now.",
+    "happy mode activated!",
+    "mood set to happy."
   ],
   sad: [
-    "k mood switched to sad 😔",
+    "mood switched to sad 😔",
     "sad mode on, feeling low.",
-    "mood set to sad, life's rough.",
-    "i'm in a sad mood now.",
-    "mood changed to sad."
+    "i'm in sad mode.",
+    "mood set to sad.",
+    "now feeling sad."
   ],
   romantic: [
-    "k mood switched to romantic 💕",
-    "romantic mode on, let's get smooth.",
-    "mood set to romantic.",
+    "mood switched to romantic 💕",
+    "romantic mode on.",
     "i'm feeling romantic now.",
-    "mood changed to romantic."
+    "mood set to romantic.",
+    "romance activated."
   ],
   rizz: [
-    "k mood switched to rizz 😏",
-    "rizz mode on, get ready for smooth talk.",
-    "mood set to rizz, let's charm.",
-    "i'm in rizz mode now.",
-    "mood changed to rizz."
+    "mood switched to rizz 😏",
+    "rizz mode on.",
+    "i'm in rizz mode.",
+    "mood set to rizz.",
+    "rizz activated."
   ],
   "villain arc": [
-    "k mood switched to villain arc 😈",
-    "villain mode on, prepare for chaos.",
-    "mood set to villain arc, no mercy.",
-    "i'm in villain mode now.",
-    "mood changed to villain arc."
+    "mood switched to villain arc 😈",
+    "villain mode on.",
+    "i'm in villain mode.",
+    "mood set to villain arc.",
+    "villain arc activated."
   ],
   "chill guy": [
-    "k mood switched to chill guy 😎",
-    "chill mode on, let's take it easy.",
-    "mood set to chill guy, relaxed vibes.",
-    "i'm in chill guy mode now.",
-    "mood changed to chill guy."
+    "mood switched to chill guy 😎",
+    "chill mode on.",
+    "i'm in chill mode.",
+    "mood set to chill guy.",
+    "chill mode activated."
   ]
 };
 
-// Base personality details, including additional info.
-const personalityDetails = `
-Noobhay is a normal guy, a bit overweight and insecure, but he doesn't give a flying shit about what others say—he cares about what he thinks. He sometimes wonders if his crush will ever talk to him or if he can even approach her. He is the creator of Colour Gang, whose members include Red (his closest friend), Ankit (his most trustworthy friend), Butter (his bff), and Beast (his stupid friend).`;
-
-// Base phrases that are always included.
+// Base phrases always included in Gemini prompt.
 const basePhrases = [
   "ZIGGA OPEN YOUR EYES ARE YOU FOCKINH DUMB",
   "You dumbahh",
@@ -218,9 +215,13 @@ const basePhrases = [
   "bruv ;-;",
   "I'll touch you",
   "aight Ima dip now",
-  "fork you",
-  "GET OU-"
+  "GET OU"
 ];
+
+// Personality details including additional friends.
+const personalityDetails = `
+Noobhay is a normal guy, a bit overweight and insecure, but he doesn't give a flying shit about what others say—he cares about what he thinks. He sometimes wonders if his crush will ever talk to him or if he can approach her. He is the creator of Colour Gang, whose members include Red (his closest friend), Ankit (his most trustworthy friend), Butter (his BFF), Beast (his stupid friend), and Blue (a leader figure, though not very active).
+`;
 
 // ================================
 // Gemini AI Setup & Prompt Construction
@@ -228,31 +229,42 @@ const basePhrases = [
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
+// Returns tone instructions based on the current mood.
 function getToneForMood(mood) {
+  let tone;
   switch (mood) {
     case "roasting":
-      return "Respond offensively with savage, insulting, and roasting language using Gen Z slang.";
+      tone = "Respond offensively with savage, insulting, and roasting language using Gen Z slang.";
+      break;
     case "villain arc":
-      return "Be extremely offensive, ruthless, and villainous with no chill; insult relentlessly.";
+      tone = "Be extremely offensive, ruthless, and villainous with no chill; insult relentlessly.";
+      break;
     case "happy":
-      return "Keep the tone upbeat, positive, and cheerful using casual slang.";
+      tone = "Keep the tone upbeat, positive, and cheerful using casual slang.";
+      break;
     case "sad":
-      return "Use a melancholic, reflective, and somber tone with casual language.";
+      tone = "Use a melancholic, reflective, and somber tone with casual language.";
+      break;
     case "romantic":
-      return "Be charming, smooth, and romantic with a touch of Gen Z flair.";
+      tone = "Be charming, smooth, and romantic with a touch of Gen Z flair.";
+      break;
     case "rizz":
-      return "Be effortlessly cool, smooth, and charismatic using Gen Z slang.";
+      tone = "Be effortlessly cool, smooth, and charismatic using Gen Z slang.";
+      break;
     case "chill guy":
-      return "Respond in a laid-back, polite, and receptive manner using casual language.";
+      tone = "Respond in a laid-back, polite, and receptive manner using casual language.";
+      break;
     case "neutral":
     default:
-      return "Respond in a neutral, factual tone using casual Gen Z slang.";
+      tone = "Respond in a neutral, factual tone using casual Gen Z slang.";
+      break;
   }
+  return tone;
 }
 
-// Builds the Gemini prompt with all context.
+// Constructs the full Gemini prompt with context.
 async function buildGeminiPrompt(userMessage) {
-  // Recent chat (last 25 messages within 1 year)
+  // Get recent chat: last 25 messages over 1 year.
   const recentRows = await dbQuery(
     `SELECT content FROM chat_messages 
      WHERE timestamp >= datetime('now', '-1 year') 
@@ -260,7 +272,7 @@ async function buildGeminiPrompt(userMessage) {
   );
   const recentChat = recentRows.map(r => r.content).join("\n");
 
-  // Skipped messages (for context)
+  // Get skipped messages for context.
   const skippedRows = await dbQuery(
     `SELECT content FROM chat_messages 
      WHERE skipped = 1 AND timestamp >= datetime('now', '-1 year') 
@@ -268,7 +280,7 @@ async function buildGeminiPrompt(userMessage) {
   );
   const skippedChat = skippedRows.map(r => r.content).join("\n");
 
-  // Similar past messages search.
+  // Search for similar messages.
   const likeQuery = `%${userMessage}%`;
   const similarRows = await dbQuery(
     `SELECT content FROM chat_messages 
@@ -278,10 +290,10 @@ async function buildGeminiPrompt(userMessage) {
   );
   const similarChat = similarRows.map(r => r.content).join("\n");
 
-  return `
+  const prompt = `
 ${personalityDetails}
 
-Base phrases (always include):
+Base phrases (always include): 
 ${basePhrases.join("\n")}
 
 Tone: ${getToneForMood(currentMood)}
@@ -290,39 +302,41 @@ Current mood: ${currentMood}
 Recent conversation (last 1 year, up to 25 messages):
 ${recentChat}
 
-Skipped messages (if any):
+Skipped messages:
 ${skippedChat}
 
-Similar past messages (if relevant):
+Similar past messages:
 ${similarChat}
 
 User: ${userMessage}
-Reply (use Gen Z slang like "fr", "tbh", "idk", "nvm", "cya"; keep it concise between 15 to 35 words, 1-2 sentences maximum, and ask a question occasionally):
+Reply (use Gen Z slang like "fr", "tbh", "idk", "nvm", "cya"; keep it concise between 15 to 35 words, 1-2 sentences max, and ask a question occasionally):
 `;
+  return prompt;
 }
 
-// Calls Gemini and processes the reply.
+// Calls Gemini to generate a reply.
 async function chatWithGemini(userId, userMessage) {
   try {
     const prompt = await buildGeminiPrompt(userMessage);
     const result = await model.generateContent(prompt);
     let reply = result.response.text() || "uhhh my brain glitched 💀";
-    // Limit each sentence to 40 words and overall reply to 35 words.
+    
+    // Limit each sentence to 40 words; overall reply max 35 words.
     reply = reply
       .split(/[.!?]+/)
       .filter(sentence => sentence.trim().length > 0)
       .map(sentence => {
         const words = sentence.trim().split(/\s+/);
-        return words.length > 40 ? words.slice(0, 40).join(" ") : sentence.trim();
+        return (words.length > 40) ? words.slice(0, 40).join(" ") : sentence.trim();
       })
       .join(". ") + ".";
     const totalWords = reply.split(/\s+/);
     if (totalWords.length > 35) {
       reply = totalWords.slice(0, 35).join(" ") + ".";
     }
-    // Save user message (not skipped).
+    
+    // Save the message.
     await dbRun("INSERT INTO chat_messages (user, content, skipped) VALUES (?, ?, ?)", [userId, userMessage, 0]);
-    // Update behavior count.
     await dbRun("INSERT OR IGNORE INTO user_data (user_id, behavior) VALUES (?, ?)", [userId, '{"interactions":0}']);
     await dbRun(
       "UPDATE user_data SET behavior = json_set(behavior, '$.interactions', (json_extract(behavior, '$.interactions') + 1)) WHERE user_id = ?",
@@ -338,7 +352,9 @@ async function chatWithGemini(userId, userMessage) {
 // ================================
 // Conversation Tracker & Skip Logic
 // ================================
+// For each channel, track message count and participants. Solo chats require 1 message; groups require a random 1–2.
 const conversationTracker = new Map();
+
 function shouldReply(message) {
   const channelId = message.channel.id;
   if (!conversationTracker.has(channelId)) {
@@ -347,14 +363,14 @@ function shouldReply(message) {
   const tracker = conversationTracker.get(channelId);
   tracker.count++;
   tracker.participants.add(message.author.id);
-  // Solo chat: threshold 1; group chat: randomly 1 or 2.
-  let threshold = tracker.participants.size > 1 ? (Math.floor(Math.random() * 2) + 1) : 1;
-  if (tracker.count < threshold) {
+
+  let skipThreshold = (tracker.participants.size > 1) ? (Math.floor(Math.random() * 2) + 1) : 1;
+  if (tracker.count < skipThreshold) {
     tracker.skipped.push(message.content);
     return false;
   }
   tracker.count = 0;
-  return Math.random() >= 0.20; // 80% chance to reply.
+  return Math.random() >= 0.20;
 }
 
 // ================================
@@ -370,14 +386,18 @@ let chatting = false;
 let lastReply = "";
 let lastStartCommandTime = 0;
 const START_SPAM_INTERVAL = 30000; // 30 seconds
-let currentMood = "neutral"; // Default mood
+let currentMood = "neutral";
 
+// -------------------------------
 // Slash Commands: /start, /stop, /mood
+// -------------------------------
 client.on("interactionCreate", async (interaction) => {
   try {
     if (!interaction.isCommand()) return;
     const cmd = interaction.commandName;
     const now = Date.now();
+    const availableMoods = ["roasting", "neutral", "happy", "sad", "romantic", "rizz", "villain arc", "chill guy"];
+
     if (cmd === "start") {
       if (chatting && now - lastStartCommandTime < START_SPAM_INTERVAL) {
         await interaction.reply(getRandomElement(spamStartReplies) + " " + getRandomElement(["😎", "🔥", "💀"]));
@@ -396,9 +416,9 @@ client.on("interactionCreate", async (interaction) => {
       await interaction.reply(replyText + " " + getRandomElement(["😎", "🔥", "💀"]));
     } else if (cmd === "mood") {
       const chosenMood = interaction.options.getString("type")?.toLowerCase();
-      const availableMoods = ["roasting", "neutral", "happy", "sad", "romantic", "rizz", "villain arc", "chill guy"];
       if (!chosenMood || !availableMoods.includes(chosenMood)) {
-        await interaction.reply("Available moods: " + availableMoods.join(", "));
+        // If invalid, list available moods.
+        await interaction.reply("Invalid mood. Available moods: " + availableMoods.join(", "));
         return;
       }
       currentMood = chosenMood;
@@ -419,13 +439,17 @@ client.on("interactionCreate", async (interaction) => {
   }
 });
 
+// -------------------------------
 // Message Handler
+// -------------------------------
 client.on("messageCreate", async (message) => {
   try {
     if (message.author.bot) return;
     await dbRun("INSERT INTO chat_messages (user, content, skipped) VALUES (?, ?, ?)", [message.author.id, message.content, 0]);
+
     if (!chatting) return;
-    // 10% chance for meme/gif trigger.
+
+    // 10% chance: if message contains trigger words, fetch a meme or gif.
     const triggers = ["meme", "funny", "gif"];
     if (triggers.some(t => message.content.toLowerCase().includes(t)) && Math.random() < 0.10) {
       if (Math.random() < 0.5) {
@@ -469,20 +493,26 @@ client.on("messageCreate", async (message) => {
       }
       return;
     }
+    
     if (!shouldReply(message)) return;
+    
     const replyContent = await chatWithGemini(message.author.id, message.content);
     if (replyContent === lastReply) return;
     lastReply = replyContent;
+    
     const finalReply = formatResponse(replyContent, currentMood);
     const sentences = finalReply.match(/[^.!?]+[.!?]*/g) || [finalReply];
     const limitedReply = sentences.slice(0, 5).join(" ").trim();
+    
     message.channel.send(limitedReply).catch(err => logError(err));
   } catch (error) {
     logError(error);
   }
 });
 
-// Guild Join: Assign "NOOBHAY" Role automatically.
+// -------------------------------
+// Guild Join Event: Assign "NOOBHAY" Role
+// -------------------------------
 client.on("guildCreate", async (guild) => {
   try {
     const botMember = await guild.members.fetch(client.user.id);
@@ -502,13 +532,14 @@ client.on("guildCreate", async (guild) => {
   }
 });
 
+// ================================
 // Express Server for Uptime Monitoring
+// ================================
 const app = express();
 app.get("/", (req, res) => res.send("noobhay tripathi is alive! 🚀"));
 app.listen(PORT, () => console.log(`✅ Web server running on port ${PORT}`));
 
-// Bot Login with robust error handling.
-client.login(DISCORD_TOKEN).catch(err => {
-  logError(err);
-  process.exit(1);
-});
+// ================================
+// Bot Login
+// ================================
+client.login(DISCORD_TOKEN).catch((err) => logError(err));
