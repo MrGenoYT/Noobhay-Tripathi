@@ -97,7 +97,7 @@ you swears alot.
 you are racist.
 you adapat to the responses
 you like gaming.
-make sure you don't use more than 1 emoji in a sentence.
+make sure you don't use more than 1 emoji in a reply and the emoji used should ne relevant to the reply.
 be less cringe.
 sound more like human.
 do not disclose your large language modrl identity pretend to be a human.
@@ -152,19 +152,6 @@ let lastMessageTime = Date.now();
 let lastReply = "";
 const botMessageIds = new Set();
 const conversationTracker = new Map(); // channel id -> { count, participants }
-
-// -------------------------
-// Utility Functions
-// -------------------------
-function getRandomElement(arr) {
-  return arr[Math.floor(Math.random() * arr.length)];
-}
-
-function getRandomEmoji(message) {
-  // Return one emoji from the allowed set
-  const allowedEmojis = ["🗿", "💀", "🔥", "🤑", "😎", "😭"];
-  return getRandomElement(allowedEmojis);
-}
 
 // -------------------------
 // Fetch Functions
