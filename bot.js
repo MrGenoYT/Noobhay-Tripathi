@@ -254,29 +254,15 @@ const moodPresets = {
   ],
 };
 
+// ================================
 // Personality & Background Details
+// ================================
 const personalityDetails = `
-Noobhay is a normal guy, a bit overweight and insecure, but he doesn't give a flying shit about what others say—he cares about what he thinks. Sometimes he wonders if his crush will ever talk to him or if he can even approach her. He is the creator of Colour Gang, a Discord server whose members include Red (his closest friend), Ankit (his most trustworthy friend and a great guy), Butter (his BFF), and Beast (his stupid friend).
+Noobhay is a normal guy, a bit overweight and insecure, but he doesn't give a flying shit about what others say—he cares about what he thinks. Sometimes he wonders if his crush, Tuntun Mousi, will ever talk to him or if he can even approach her. He is the creator of Colour Gang, a Discord server whose members include Red (his closest friend), Ankit (his most trustworthy friend and a great guy), Butter (his BFF), and Beast (his stupid friend).
 `;
-
-// Base phrases (always included)
-const basePhrases = [
-  "ZIGGA OPEN YOUR EYES ARE YOU FOCKINH DUMB",
-  "You dumbahh",
-  "bro you know you should kys",
-  "hell nawh kys zigga",
-  "yeah man idc about ts tbh人",
-  "stop yapping bitch ahh",
-  "bruv ;-;",
-  "I'll touch you",
-  "aight Ima dip now",
-  "fork you",
-  "GET OU-",
-];
 
 // ================================
 // Global State Variables
-// (Moved up so they’re available to all functions)
 // ================================
 let chatting = false;
 let lastReply = "";
@@ -481,7 +467,6 @@ client.on("interactionCreate", async (interaction) => {
         : getRandomElement(stopRepliesNoEmoji);
       await interaction.reply(replyText + " " + getRandomElement(["😎", "🔥", "💀"]));
     } else if (cmd === "mood") {
-      const chosenMood = interaction.options.getString("type")?.toLowerCase();
       const availableMoods = [
         "roasting",
         "neutral",
@@ -492,8 +477,18 @@ client.on("interactionCreate", async (interaction) => {
         "villain arc",
         "chill guy",
       ];
-      if (!chosenMood || !availableMoods.includes(chosenMood)) {
-        await interaction.reply("Available moods: " + availableMoods.join(", "));
+      const chosenMood = interaction.options.getString("type")?.toLowerCase();
+      if (!chosenMood) {
+        await interaction.reply(
+          "Please specify a mood. Available moods: " + availableMoods.join(", ")
+        );
+        return;
+      }
+      if (!availableMoods.includes(chosenMood)) {
+        await interaction.reply(
+          "Invalid mood. Please choose from the available moods: " +
+            availableMoods.join(", ")
+        );
         return;
       }
       currentMood = chosenMood;
@@ -621,4 +616,4 @@ app.listen(PORT, () =>
 // ================================
 // Bot Login
 // ================================
-client.login(DISCORD_TOKEN).catch((err) => logError(err));
+client.login(DISCORD_TOKEN).catch((err) => logError(err));p
