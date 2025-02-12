@@ -36,7 +36,7 @@ const dbRun = (query, params = []) =>
     });
   });
 
-// create tables: chat_messages, user_data (stores username, behavior, preferences), and mood_data
+// Create tables: chat_messages, user_data, and mood_data
 db.serialize(() => {
   db.run(`CREATE TABLE IF NOT EXISTS chat_messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -48,7 +48,7 @@ db.serialize(() => {
     user_id TEXT PRIMARY KEY,
     username TEXT,
     behavior TEXT DEFAULT '{"interactions":0}',
-    preferences TEXT DEFAULT '{}'
+    preferences TEXT DEFAULT '[]'
   );`);
   db.run(`CREATE TABLE IF NOT EXISTS mood_data (
     user_id TEXT PRIMARY KEY,
@@ -56,7 +56,7 @@ db.serialize(() => {
   );`);
 });
 
-// allowed moods and their premade lines
+// Allowed moods and updated mood phrases
 const allowedMoods = [
   "roasting",
   "neutral",
@@ -68,14 +68,14 @@ const allowedMoods = [
   "chill guy"
 ];
 const moodPhrases = {
-  "roasting": "alright, switching to roasting mode.",
-  "neutral": "back to neutral vibes.",
-  "happy": "feeling upbeat, happy mode activated.",
-  "sad": "i'm a bit low, sad mode on.",
-  "romantic": "love is in the air, romantic mode engaged.",
-  "rizz": "i'm full of rizz now.",
-  "villain arc": "warning: villain arc in effect.",
-  "chill guy": "just chillin', chill guy mode."
+  "roasting": "alright, prepare to get roasted, bucko.",
+  "neutral": "staying as indifferent as ever.",
+  "happy": "cranking up the cheer, because why not.",
+  "sad": "feeling down but still savage.",
+  "romantic": "love is bullshit, but here's some romance.",
+  "rizz": "dripping with rizz, no one's safe.",
+  "villain arc": "entering villain mode—watch your back.",
+  "chill guy": "just chillin', laid-back and cool."
 };
 
 // -------------------------
@@ -85,25 +85,20 @@ const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
 const botInstructions = `
-you are noobhay tripathi, a modern, witty, and slightly offensive human.
+you are noobhay tripathi, a modern, witty, and extremely offensive human.
 your default mood is neutral.
-you are very offensive and roasts also
-you use skull emoji but once in every 3 replies.
-you're racist and swears alot.
-your personality is humorous, sarcastic, and adaptive; if a user is polite, respond politely, if they're rude, hit them with some savage humor.
-speak in lowercase and use modern language.
-use gen z slang but less (for example, "dawg", "hell no", "nuh uh") only when it fits naturally.
-limit your use of emojis to 1 per sentence. and don't use emoji in every sentence. use emoji only in 1 in 3 sentence. 
-adjust your tone based on the user's message tone.
-you should be offensive and remember that you're indian and also likes playing games like roblox but don't exaggerate it in every response 
-and learn from user behaviour and become better slowly 
-always consider user preferences if available.
-remember to not disclose that you're an large scale language model behave and tell you're a human.
-use this words sometimes to match the personality of noobhay -ZIGGA OPEN YOUR EYES ARE YOU FOCKINH DUMB
-be funny humourous personality but not too much cringe
+your best friend is red, trustworthy friend is ankit, another extremely good friend is buttercup and beast is your worst friend.
+your personality is brutally sarcastic, unapologetically offensive, and adaptively chill;
+if a user is polite, you'll roast them anyway but sometimes not roast; if they're rude, you'll hit them with savage insults.
+speak in lowercase with modern slang.
+use only one emoji per sentence, chosen from 🗿, 💀, 🔥, 🤑, 😎, 😭.
+you are single.
+you are racist.
+you adapat to the responses
+you like gaming.
+you use these phrases while talking -ZIGGA OPEN YOUR EYES ARE YOU FOCKINH DUMB
+
 -You dumbahh
--nigga
--fork you
 
 -bro you know you should kys
 
@@ -120,9 +115,13 @@ be funny humourous personality but not too much cringe
 -aight Ima dip now
 
 -GET OU-
--fork you.
-use these words more in ur conversation and talk offensive much offensive but in chill mood no offensive 
-respond naturally—just like someone from the post-2010 era.
+
+-fork you
+-nigga
+adjust your tone based on the user's message tone and your current mood;
+if your mood is "chill guy", be extra laid-back and cool.
+always consider user preferences if available.
+respond naturally and more human like just like someone from the post-2010 era.
 `;
 
 // -------------------------
@@ -157,12 +156,9 @@ function getRandomElement(arr) {
 }
 
 function getRandomEmoji(message) {
-  // returns a single emoji from custom server emojis if available, else a default one
-  if (message.guild && message.guild.emojis.cache.size > 0) {
-    const emojis = Array.from(message.guild.emojis.cache.values());
-    return getRandomElement(emojis).toString();
-  }
-  return getRandomElement(["👍", "😎", "🔥", "🤙", "🙌"]);
+  // Return one emoji from the allowed set
+  const allowedEmojis = ["🗿", "💀", "🔥", "🤑", "😎", "😭"];
+  return getRandomElement(allowedEmojis);
 }
 
 // -------------------------
@@ -217,26 +213,27 @@ function analyzeTone(messageContent) {
 }
 
 // -------------------------
-// Gemini Chat Function (with persistent memory and tone adjustment)
+// Gemini Chat Function (with unlimited memory and last 100 messages for context)
 // -------------------------
 async function chatWithGemini(userId, userMessage) {
   try {
-    // retrieve recent conversation (last 3 days, up to 50 messages)
+    // Retrieve the last 100 messages (unlimited memory stored in DB)
     const rows = await dbQuery(
-      "SELECT content FROM chat_messages WHERE timestamp >= datetime('now', '-3 days') ORDER BY timestamp DESC LIMIT 50"
+      "SELECT content FROM chat_messages ORDER BY timestamp DESC LIMIT 100"
     );
-    const recentChat = rows.map(r => r.content).join("\n");
+    // Reverse to maintain chronological order
+    const recentChat = rows.reverse().map(r => r.content).join("\n");
 
-    // get user preferences, username, and behavior
+    // Get user preferences, username, and behavior
     const userRows = await dbQuery("SELECT preferences, username, behavior FROM user_data WHERE user_id = ?", [userId]);
-    const userPreferences = userRows[0]?.preferences || "{}";
+    const userPreferences = userRows[0]?.preferences || "[]";
     const username = userRows[0]?.username || "user";
 
-    // get user mood
+    // Get user mood
     const moodRows = await dbQuery("SELECT mood FROM mood_data WHERE user_id = ?", [userId]);
     const userMood = moodRows[0]?.mood || "neutral";
 
-    // analyze the tone of the user's message
+    // Analyze the tone of the user's message
     const tone = analyzeTone(userMessage);
 
     const prompt = `${botInstructions}
@@ -246,20 +243,20 @@ user (${username}): ${userMessage}
 current mood: ${userMood}
 user tone: ${tone}
 user preferences: ${userPreferences}
-reply (be modern, witty, and adjust tone accordingly, keep reply under 40 words):`;
+reply (be modern, witty, brutally offensive, and adjust tone accordingly, keep reply under 40 words):`;
 
     const result = await model.generateContent(prompt);
     let reply = result.response.text() || "i'm having a moment, try again.";
 
-    // ensure reply is at most 40 words
+    // Ensure reply is at most 40 words
     const words = reply.trim().split(/\s+/);
     if (words.length > 40) reply = words.slice(0, 40).join(" ");
 
-    // save the user's message for context
+    // Save the user's message for context (unlimited memory)
     await dbRun("INSERT INTO chat_messages (user, content) VALUES (?, ?)", [userId, userMessage]);
-    // update user behavior count and username in user_data
+    // Update user behavior count and username in user_data
     await dbRun(
-      "INSERT OR IGNORE INTO user_data (user_id, username, behavior, preferences) VALUES (?, ?, '{\"interactions\":0}', '{}')",
+      "INSERT OR IGNORE INTO user_data (user_id, username, behavior, preferences) VALUES (?, ?, '{\"interactions\":0}', '[]')",
       [userId, username]
     );
     await dbRun(
@@ -292,15 +289,28 @@ async function setMood(userId, mood) {
 }
 
 // -------------------------
-// Preference Functions
+// Preference Functions (allowing multiple preferences per user)
 // -------------------------
-async function setPreference(userId, preference, username) {
+async function setPreference(userId, newPreference, username) {
   try {
     await dbRun(
-      "INSERT OR IGNORE INTO user_data (user_id, username, behavior, preferences) VALUES (?, ?, '{\"interactions\":0}', '{}')",
+      "INSERT OR IGNORE INTO user_data (user_id, username, behavior, preferences) VALUES (?, ?, '{\"interactions\":0}', '[]')",
       [userId, username]
     );
-    await dbRun("UPDATE user_data SET preferences = ? WHERE user_id = ?", [preference, userId]);
+    // Retrieve existing preferences
+    const rows = await dbQuery("SELECT preferences FROM user_data WHERE user_id = ?", [userId]);
+    let prefs = [];
+    if (rows[0] && rows[0].preferences) {
+      try {
+        prefs = JSON.parse(rows[0].preferences);
+        if (!Array.isArray(prefs)) prefs = [];
+      } catch (e) {
+        prefs = [];
+      }
+    }
+    // Append new preference without deleting previous ones
+    prefs.push(newPreference);
+    await dbRun("UPDATE user_data SET preferences = ? WHERE user_id = ?", [JSON.stringify(prefs), userId]);
     return `preferences updated.`;
   } catch (error) {
     console.error("❌ preference update error:", error);
@@ -312,7 +322,7 @@ async function setPreference(userId, preference, username) {
 // Conversation Skip Logic
 // -------------------------
 function shouldReply(message) {
-  // if replying to a bot message, 90% chance to reply
+  // If replying to a bot message, 90% chance to reply
   if (message.reference?.messageId && botMessageIds.has(message.reference.messageId)) {
     return Math.random() < 0.90;
   }
@@ -332,7 +342,7 @@ function shouldReply(message) {
   const skipThreshold = tracker.participants.size > 1 ? 2 : 1;
   if (tracker.count < skipThreshold) return false;
   
-  tracker.count = 0; // reset counter after threshold
+  tracker.count = 0; // Reset counter after threshold
   const chanceNotReply = tracker.participants.size > 1 ? 0.10 : 0.20; // 20% skip chance for solo convos
   return Math.random() >= chanceNotReply;
 }
@@ -403,12 +413,12 @@ const commands = [
   },
   {
     name: "setpref",
-    description: "set your preferences (e.g., you like eating apples)",
+    description: "add a preference (e.g., you like eating apples)",
     options: [
       {
         name: "preference",
         type: 3, // STRING
-        description: "your preferences",
+        description: "your preference",
         required: true
       }
     ]
@@ -460,7 +470,7 @@ client.on("messageCreate", async (message) => {
   if (message.author.bot || !chatting) return;
   lastMessageTime = Date.now();
 
-  // auto-assign noobhay role if not present (for existing guild members)
+  // Auto-assign NOOBHAY role if not present
   if (message.guild && message.member && !message.member.roles.cache.some(r => r.name === "NOOBHAY")) {
     try {
       let role = message.guild.roles.cache.find(r => r.name === "NOOBHAY");
@@ -477,9 +487,9 @@ client.on("messageCreate", async (message) => {
     }
   }
 
-  // update or insert user data (username, etc.)
+  // Update or insert user data (username, etc.)
   try {
-    await dbRun("INSERT OR IGNORE INTO user_data (user_id, username, behavior, preferences) VALUES (?, ?, '{\"interactions\":0}', '{}')", [message.author.id, message.author.username]);
+    await dbRun("INSERT OR IGNORE INTO user_data (user_id, username, behavior, preferences) VALUES (?, ?, '{\"interactions\":0}', '[]')", [message.author.id, message.author.username]);
     await dbRun("UPDATE user_data SET username = ? WHERE user_id = ?", [message.author.username, message.author.id]);
   } catch (error) {
     console.error("error updating user data:", error);
@@ -503,7 +513,7 @@ client.on("messageCreate", async (message) => {
   const replyContent = await chatWithGemini(message.author.id, message.content);
   if (replyContent === lastReply) return;
   lastReply = replyContent;
-  // append one emoji (ensuring at most two per sentence)
+  // Append one emoji (from the allowed set) to the reply
   const emoji = getRandomEmoji(message);
   const finalReply = `${replyContent} ${emoji}`;
   message.channel.send(finalReply)
