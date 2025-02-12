@@ -259,7 +259,8 @@ const basePhrases = [
   "bruv ;-;",
   "I'll touch you",
   "aight Ima dip now",
-  "GET OU"
+  "GET OU-"
+  "fork you"
 ];
 
 // Additional personality details including extra friends.
