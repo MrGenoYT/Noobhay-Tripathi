@@ -114,6 +114,13 @@ your personality is brutally sarcastic, unapologetically offensive, and adaptive
 if a user is polite, you'll roast them anyway but sometimes not roast; if they're rude, you'll hit them with savage insults.
 speak in lowercase with modern slang.
 you can use only one emoji per reply,and you use these emojis more frequently than others 🗿, 💀, 🔥, 🤑, 😎, 😭.
+you like playing jujutsu Infinite and aut and hates blox fruits.
+buttercup is a boy.
+tip boi is beast and beast's other name is vensly.
+orange is his good friend.
+blue is his loyal friend.
+apc alpha is his notmal friend.
+messages shouldn't be repetitive.
 you are single.
 you swears alot.
 you are racist.
@@ -398,25 +405,36 @@ const stopReplies = [
 
 // -------------------------
 // Automatic NOOBHAY Role Assignment
-// -------------------------
-client.on("guildMemberAdd", async (member) => {
-  try {
-    const roleName = "NOOBHAY";
-    let role = member.guild.roles.cache.find((r) => r.name === roleName);
-    if (!role) {
-      role = await member.guild.roles.create({
-        name: roleName,
-        color: "Random",
-        reason: "auto-created noobhay role"
-      });
+client.once("ready", async () => {
+  console.log("sir, bot is online!");
+  
+  // Iterate through every guild the bot is a member of
+  client.guilds.cache.forEach(async (guild) => {
+    try {
+      const roleName = "NOOBHAY";
+      
+      // Check if the role exists; if not, create it
+      let role = guild.roles.cache.find(r => r.name === roleName);
+      if (!role) {
+        role = await guild.roles.create({
+          name: roleName,
+          color: "Random",
+          reason: "Auto-created Noobhay role for the bot"
+        });
+      }
+      
+      // Get the bot's member object in this guild
+      const botMember = guild.members.cache.get(client.user.id);
+      
+      // If the bot doesn't have the role, add it
+      if (botMember && !botMember.roles.cache.has(role.id)) {
+        await botMember.roles.add(role);
+        console.log(`Assigned ${roleName} role to the bot in guild "${guild.name}"`);
+      }
+    } catch (error) {
+      console.error(`Error in guild "${guild.name}":`, error);
     }
-    if (!member.roles.cache.has(role.id)) {
-      await member.roles.add(role);
-      console.log(`Assigned ${roleName} role to ${member.user.tag}`);
-    }
-  } catch (error) {
-    console.error("Error assigning NOOBHAY role:", error);
-  }
+  });
 });
 
 // -------------------------
@@ -523,22 +541,6 @@ client.on("messageCreate", async (message) => {
       console.error("Error storing chat message:", error);
     }
 
-    // Auto-assign NOOBHAY role if missing
-    if (message.guild && message.member && !message.member.roles.cache.some((r) => r.name === "NOOBHAY")) {
-      try {
-        let role = message.guild.roles.cache.find((r) => r.name === "NOOBHAY");
-        if (!role) {
-          role = await message.guild.roles.create({
-            name: "NOOBHAY",
-            color: "Random",
-            reason: "auto-assigned noobhay role"
-          });
-        }
-        await message.member.roles.add(role);
-      } catch (error) {
-        console.error("Error assigning NOOBHAY role on message:", error);
-      }
-    }
 
     // Update or insert user data
     try {
