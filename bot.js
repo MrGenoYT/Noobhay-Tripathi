@@ -68,12 +68,12 @@ function logError(err) {
 // Utility Functions & Presets
 // ================================
 
-// Pick a random element from an array.
+// Returns a random element from an array.
 function getRandomElement(arr) {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
-// Custom emoji pool (includes frequently used ones)
+// Retrieves a random emoji, using server custom emojis if available.
 function getRandomEmoji(message) {
   if (message?.guild && message.guild.emojis.cache.size > 0) {
     const emojis = Array.from(message.guild.emojis.cache.values());
@@ -84,9 +84,9 @@ function getRandomEmoji(message) {
   return getRandomElement(["😎", "😂", "😭", "💀", "😔", "🔥", "🗿", "😈"]);
 }
 
-// Format a response by splitting into sentences and adding an emoji occasionally.
+// Formats the response by splitting it into sentences and adding an emoji occasionally.
 function formatResponse(rawResponse, currentMood) {
-  let emojiChance = 0.33; // default 33%
+  let emojiChance = 0.33;
   if (["roasting", "villain arc"].includes(currentMood)) emojiChance = 0.66;
   else if (currentMood === "chill guy") emojiChance = 0.25;
   
@@ -103,76 +103,52 @@ function formatResponse(rawResponse, currentMood) {
   return formatted;
 }
 
-// ================================
-// Preset Replies for Slash Commands
-// ================================
+// -------------------------------
+// Reduced Preset Replies for Slash Commands
+// -------------------------------
 
-// Reduced presets for /start with emoji (10 presets)
+// /start presets (with emoji) – 5 variants
 const startRepliesEmoji = [
   "ayyy i'm awake, ready to wreck this chat 😈",
   "yo, i'm live—time to bring the heat 🔥",
   "woke up, now watch me roast these fools 😎",
-  "i'm in, let's tear it up 💀",
-  "time to get savage, bruv 😈",
-  "i'm up, no time for chit-chat 🔥",
-  "rise and roast, let's go 😎",
   "i'm here to dish out truth 💀",
-  "get ready, i'm live and lit 😈",
-  "no sleep, all roast—i'm here 🔥"
+  "rise and roast, let's go 😈"
 ];
 
-// Reduced presets for /start without emoji (5 presets)
+// /start presets (without emoji) – 3 variants
 const startRepliesNoEmoji = [
   "ayyy i'm awake, ready to wreck this chat",
   "yo, i'm live—time to bring the heat",
-  "woke up, now watch me roast these fools",
-  "i'm in, let's tear it up",
-  "time to get savage, bruv"
+  "woke up, now watch me roast these fools"
 ];
 
-// Reduced presets for /start spam (15 presets)
+// /start spam presets – 5 variants
 const spamStartReplies = [
   "chill, i'm already live, dumbass",
   "save your breath, i’m awake already",
-  "hey, stop spamming /start, idiot",
-  "i'm live, now zip it",
-  "enough already, i’m up",
-  "i got it, i'm awake—now back off",
-  "spamming won't change anything, bruv",
   "i already said i'm live, moron",
-  "stop the noise, i'm already online",
-  "yo, i’m awake—get a grip",
-  "again? i told you i'm up",
-  "i’m not a broken record, dumbass",
-  "calm down, i'm here, now be cool",
-  "i already woke up, now shut up",
-  "enough with the /start already"
+  "enough already, i’m up",
+  "i got it, i'm awake—now back off"
 ];
 
-// Reduced presets for /stop with emoji (10 presets)
+// /stop presets (with emoji) – 5 variants
 const stopRepliesEmoji = [
   "fine, i'm out, peace out 😈",
   "i’m done here, later bitch 🔥",
   "i’m ghosting, catch ya on the flip 💀",
-  "i’m dipping now, bye 😎",
-  "bye, i’m out—don’t miss me 😈",
-  "i’m off, peace out, sucka 🔥",
-  "done, i'm logging off, later 💀",
-  "i’m leaving, see ya, bitch 😎",
-  "time to dip, i'm out 😈",
-  "i’m gone, catch you later 🔥"
+  "i'm dipping now, bye 😎",
+  "i'm off, peace and roast 😈"
 ];
 
-// Reduced presets for /stop without emoji (5 presets)
+// /stop presets (without emoji) – 3 variants
 const stopRepliesNoEmoji = [
   "fine, i'm out, peace out",
   "i’m done here, later bitch",
-  "i’m ghosting, catch ya on the flip",
-  "i’m dipping now, bye",
-  "bye, i’m out—don’t miss me"
+  "i’m ghosting, catch ya on the flip"
 ];
 
-// Mood switch presets (unchanged)
+// Mood switch presets (10 variants per mood)
 const moodPresets = {
   roasting: [
     "k mood switched to roasting 🔥",
@@ -272,7 +248,7 @@ const moodPresets = {
   ]
 };
 
-// Base phrases always included in Gemini prompt.
+// Base phrases to always include in every Gemini prompt.
 const basePhrases = [
   "ZIGGA OPEN YOUR EYES ARE YOU FOCKINH DUMB",
   "You dumbahh",
@@ -286,9 +262,17 @@ const basePhrases = [
   "GET OU"
 ];
 
-// Additional background details for Noobhay.
+// Additional personality details including extra friends.
 const personalityDetails = `
-Noobhay is a normal guy, a bit overweight and insecure, but he doesn't give a flying shit about what others say—he cares about what he thinks. He sometimes wonders if his crush will ever talk to him or if he can even approach her. He is the creator of Colour Gang, a discord server whose members include Red (his closest friend), Ankit (his most trustworthy friend and a great guy), and Blue (a leader figure, though not very active).`;
+Noobhay is a normal guy, a bit overweight and insecure, but he doesn't give a flying shit about what others say—he cares about what he thinks.
+He sometimes wonders if his crush will ever talk to him or if he can even approach her.
+He is the creator of Colour Gang, a Discord server whose members include:
+  - Red (his closest friend),
+  - Ankit (his most trustworthy friend),
+  - Butter (his BFF),
+  - Beast (his stupid friend),
+  - Blue (a leader figure, though not very active).
+`;
 
 // ================================
 // Gemini AI Setup & Prompt Construction
@@ -357,6 +341,7 @@ async function buildGeminiPrompt(userMessage) {
   );
   const similarChat = similarRows.map(r => r.content).join("\n");
 
+  // Build and return the full prompt.
   const prompt = `
 ${personalityDetails}
 
@@ -388,7 +373,7 @@ async function chatWithGemini(userId, userMessage) {
     const result = await model.generateContent(prompt);
     let reply = result.response.text() || "uhhh my brain glitched 💀";
     
-    // Ensure each sentence is max 40 words; overall reply max 35 words.
+    // Limit each sentence to 40 words; overall reply max 35 words.
     reply = reply
       .split(/[.!?]+/)
       .filter(sentence => sentence.trim().length > 0)
@@ -403,9 +388,8 @@ async function chatWithGemini(userId, userMessage) {
       reply = totalWords.slice(0, 35).join(" ") + ".";
     }
     
-    // Save the user message.
+    // Save the user message (as not skipped) and update user behavior.
     await dbRun("INSERT INTO chat_messages (user, content, skipped) VALUES (?, ?, ?)", [userId, userMessage, 0]);
-    // Update user behavior count.
     await dbRun("INSERT OR IGNORE INTO user_data (user_id, behavior) VALUES (?, ?)", [userId, '{"interactions":0}']);
     await dbRun(
       "UPDATE user_data SET behavior = json_set(behavior, '$.interactions', (json_extract(behavior, '$.interactions') + 1)) WHERE user_id = ?",
@@ -422,6 +406,7 @@ async function chatWithGemini(userId, userMessage) {
 // ================================
 // Conversation Tracker & Skip Logic
 // ================================
+// Tracks messages per channel. In solo chats, wait for 1 message; in groups, randomly 1 or 2.
 const conversationTracker = new Map();
 
 function shouldReply(message) {
@@ -433,14 +418,13 @@ function shouldReply(message) {
   tracker.count++;
   tracker.participants.add(message.author.id);
 
-  // Skip threshold: solo = 1 message; groups = random between 1 and 2.
   let skipThreshold = (tracker.participants.size > 1) ? (Math.floor(Math.random() * 2) + 1) : 1;
   if (tracker.count < skipThreshold) {
     tracker.skipped.push(message.content);
     return false;
   }
   tracker.count = 0;
-  return Math.random() >= 0.20; // 80% chance to reply
+  return Math.random() >= 0.20;
 }
 
 // ================================
@@ -451,7 +435,6 @@ const client = new Client({
   partials: [Partials.Channel]
 });
 
-// Global state.
 let chatting = false;
 let lastReply = "";
 let lastStartCommandTime = 0;
@@ -584,50 +567,30 @@ client.on("messageCreate", async (message) => {
 client.on("guildCreate", async (guild) => {
   try {
     const botMember = await guild.members.fetch(client.user.id);
-    let role = guild.roles.cache.find(r => r.name ===
-
-"NOOBHAY");
-
-if (!role) {
-
-role = await guild.roles.create({
-
-name: "NOOBHAY",
-
-color: "RED",
-
-reason: "Assigning NOOBHAY role to the bot
-
-upon joining."
-
+    let role = guild.roles.cache.find(r => r.name === "NOOBHAY");
+    if (!role) {
+      role = await guild.roles.create({
+        name: "NOOBHAY",
+        color: "RED",
+        reason: "Assigning NOOBHAY role to the bot upon joining."
+      });
+    }
+    if (!botMember.roles.cache.has(role.id)) {
+      await botMember.roles.add(role);
+    }
+  } catch (error) {
+    logError(error);
+  }
 });
 
-}
-
-if (!botMember.roles.cache.has(role.id)) {
-
-await botMember.roles.add(role);
-
-}
-
-} catch (error) {
-
-logError(error);
-
-}
-
-});
-
+// ================================
 // Express Server for Uptime Monitoring
-
+// ================================
 const app = express();
+app.get("/", (req, res) => res.send("noobhay tripathi is alive! 🚀"));
+app.listen(PORT, () => console.log(`✅ Web server running on port ${PORT}`));
 
-app.get("/", (req, res) => res.send("noobhay tripathi is alive!"));
-
-app.listen(PORT, () => console.log( running on port ${PORT}')); Web server
-
+// ================================
 // Bot Login
-
-===
-
+// ================================
 client.login(DISCORD_TOKEN).catch(err => logError(err));
