@@ -380,15 +380,15 @@ client.once("ready", async () => {
   // Iterate through every guild the bot is a member of
   client.guilds.cache.forEach(async (guild) => {
     try {
-      const roleName = "NOOBHAY";
+      const roleName = "superior walmart bag 🗿";
       
       // Check if the role exists; if not, create it
       let role = guild.roles.cache.find(r => r.name === roleName);
       if (!role) {
         role = await guild.roles.create({
           name: roleName,
-          color: "Random",
-          reason: "Auto-created Noobhay role for the bot"
+          color: "random",
+          reason: "Auto-created walmart bag role for the bot"
         });
       }
       
