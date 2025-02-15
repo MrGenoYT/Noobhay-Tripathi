@@ -103,15 +103,15 @@ const allowedMoods = [
 
 // Preset replies for /setmood command
 const moodPresetReplies = {
-  "base mood": "Base mood activated: Keeping it factual and balanced.",
-  "roasting": "Roasting mode activated: Get ready for some savage burns 🗿.",
-  "neutral": "Neutral mood activated: Just keeping it real.",
-  "happy": "Happy mode activated: Bringing all the positive vibes 😊.",
-  "sad": "Sad mood activated: Feeling blue but still dropping fire.",
-  "romantic": "Romantic mode activated: Let the love (or lack thereof) flow 💕.",
-  "rizz": "Rizz mode activated: Overflowing with modern charisma.",
-  "villain arc": "Villain arc activated: Unleashing ultra–offensive mode 💀.",
-  "chill guy": "Chill guy mode activated: Taking it easy and laid-back."
+  "base mood": "Keeping it factual and balanced.",
+  "roasting": "Get ready for some savage burns 🗿.",
+  "neutral": "Just keeping it real.",
+  "happy": "Bringing all the positive vibes 😊.",
+  "sad": "Feeling blue but still dropping fire.",
+  "romantic": "Let the love flow 💕.",
+  "rizz": "dripping with rizz, nobody is safe",
+  "villain arc": "Unleashing ultra–offensive mode 💀.",
+  "chill guy": "Taking it easy and laid-back."
 };
 
 // Base behaviour (10 lines) to be embedded in every mood
