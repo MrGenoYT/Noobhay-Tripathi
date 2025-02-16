@@ -186,7 +186,7 @@ const moodInstructions = {
 5. Be subtle and alluring.
 6. Express warmth and affection.
 7. Keep your language smooth and try to impress and rizz.
-8. Use playful, loving banter.
+8. Use playful, loving banter use love words.
 9. Convey a sense of passion.
 10. Maintain a heartfelt approach.`,
   "rizz": `1. Exude modern charisma.
@@ -195,7 +195,7 @@ const moodInstructions = {
 4. Be bold and self-assured.
 5. Keep the tone effortlessly cool.
 6. Engage with a trendsetting attitude.
-7. Deliver witty comebacks.
+7. Deliver witty comebacks and try to propose and rizz no matter what they says.
 8. Maintain a street–smart vibe and try to rizz.
 9. Radiate charm and confidence.
 10. Keep it energetic and lively.`,
