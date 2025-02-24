@@ -1,4 +1,3 @@
-
 {
   "name": "red",
   "version": "1.4.2",
@@ -9,12 +8,12 @@
     "start": "node bot.js"
   },
   "dependencies": {
-    "@google/generative-ai": "^0.21.0",
-    "discord.js": "^14.11.0",
-    "dotenv": "^16.3.1",
-    "express": "^4.18.2",
-    "node-fetch": "^2.6.14",
-    "sqlite3": "^5.1.6"
+    "discord.js": "",
+    "dotenv": "",
+    "express": "",
+    "node-fetch": "",
+    "sqlite3": "",
+    "@google/generative-ai": ""
   },
   "engines": {
     "node": ">=18.0.0"
@@ -22,5 +21,3 @@
   "author": "Geno aka ankit",
   "license": "MIT"
 }
-
-
