@@ -283,6 +283,7 @@ client.on("warn", (info) => console.warn("Client Warning:", info));
 /********************************************************************
  * SECTION 7: GLOBAL STATE & HELPER FUNCTIONS
  ********************************************************************/
+let continuousReply = false;
 let chatting = false;
 let lastMessageTime = Date.now();
 let lastReply = "";
@@ -379,6 +380,7 @@ function updateConversationTracker(message) {
 }
 
 function shouldReply(message) {
+  if (continuousReply) return true; // Always reply if continuous mode is enabled
   // If replying to a bot message, 90% chance
   if (message.reference?.messageId && botMessageIds.has(message.reference.messageId)) {
     return Math.random() < 0.90;
@@ -565,6 +567,22 @@ const commands = [
     description: "stop the bot from chatting",
   },
   {
+    name: "contreply",
+    description: "Enable or disable continuous reply mode",
+    options: [
+      {
+        name: "mode",
+        type: 3, // STRING
+        description: "Choose enable or disable",
+        required: true,
+        choices: [
+          { name: "enable", value: "enable" },
+          { name: "disable", value: "disable" }
+        ],
+      },
+    ],
+  },
+  {
  name: "setmood",
     description: "set your mood",
     options: [
@@ -649,6 +667,15 @@ client.on("interactionCreate", async (interaction) => {
       const mood = interaction.options.getString("mood").toLowerCase();
       const response = await setMood(interaction.user.id, mood);
       await interaction.reply({ content: response, ephemeral: true });
+    } else if (commandName === "contreply") {
+    const mode = interaction.options.getString("mode");
+    continuousReply = mode === "enable";
+    await interaction.reply({
+      content: continuousReply
+        ? "I will respond to every message."
+        : "Back to normal behavior.",
+      ephemeral: true
+    });
     } else if (commandName === "setpref") {
       const preference = interaction.options.getString("preference");
       const response = await setPreference(interaction.user.id, preference, interaction.user.username);
