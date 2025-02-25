@@ -723,7 +723,7 @@ const commands = [
     name: "meme",
     description: "Fetch a meme from Reddit directly",
     options: [
-      { name: "keyword", type: 3, description: "Optional search keyword", required: false }
+      { name: "keyword", type: 3, description: "Optional search keyword", required: true }
     ]
   },
   {
