@@ -1,8 +1,8 @@
 /********************************************************************
  * SECTION 1: IMPORTS & ENVIRONMENT SETUP
  ********************************************************************/
-import { 
-  Client, GatewayIntentBits, Partials, REST, Routes, 
+import {
+  Client, GatewayIntentBits, Partials, REST, Routes,
   ActionRowBuilder, StringSelectMenuBuilder, SlashCommandBuilder,
   ChannelType, PermissionsBitField
 } from "discord.js";
@@ -21,38 +21,35 @@ const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const TENOR_API_KEY = process.env.TENOR_API_KEY;
 const PORT = process.env.PORT || 3000;
 
-// Global chat toggle for all servers and global mood settings
+// Global chat toggle for all servers (default ON)
 let globalChatEnabled = true;
-let globalMoodEnabled = false;
-let globalMood = "neutral";
+
+// Global custom mood override (when enabled, all users use this mood)
+let globalCustomMood = { enabled: false, mood: null };
 
 /********************************************************************
  * SECTION 2: SUPER ADVANCED ERROR HANDLER
  ********************************************************************/
 function advancedErrorHandler(error, context = "General") {
-  try {
-    const timestamp = new Date().toISOString();
-    const errorMsg = `[${timestamp}] [${context}] ${error.stack || error}\n`;
-    console.error(errorMsg);
-    fs.appendFile("error.log", errorMsg, (err) => {
-      if (err) console.error("Failed to write to error.log:", err);
-    });
-  } catch (e) {
-    console.error("Error in advancedErrorHandler:", e);
-  }
+  const timestamp = new Date().toISOString();
+  const errorMsg = `[${timestamp}] [${context}] ${error.stack || error}\n`;
+  console.error(errorMsg);
+  fs.appendFile("error.log", errorMsg, (err) => {
+    if (err) console.error("Failed to write to error.log:", err);
+  });
 }
 
 process.on("uncaughtException", (error) => {
   advancedErrorHandler(error, "Uncaught Exception");
 });
-process.on("unhandledRejection", (reason, promise) => {
+process.on("unhandledRejection", (reason) => {
   advancedErrorHandler(reason, "Unhandled Rejection");
 });
 
 /********************************************************************
  * SECTION 3: DATABASE SETUP (INCLUDING DISCORD MESSAGE IDs)
  ********************************************************************/
-// Updated chat_messages schema to include guild_id and channel_id for debug queries
+// Updated chat_messages table to store channel_id as well.
 const db = new sqlite3.Database(
   "chat.db",
   sqlite3.OPEN_READWRITE | sqlite3.OPEN_CREATE,
@@ -78,13 +75,11 @@ const dbRun = (query, params = []) =>
     });
   });
 
-// Create tables if they don't exist
 db.serialize(() => {
   db.run(`
     CREATE TABLE IF NOT EXISTS chat_messages (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       discord_id TEXT,
-      guild_id TEXT,
       channel_id TEXT,
       user TEXT,
       content TEXT,
@@ -105,7 +100,6 @@ db.serialize(() => {
       mood TEXT DEFAULT 'neutral'
     );
   `);
-  // Server settings table: per-guild chat enable state and allowed channels
   db.run(`
     CREATE TABLE IF NOT EXISTS server_settings (
       guild_id TEXT PRIMARY KEY,
@@ -113,14 +107,14 @@ db.serialize(() => {
       allowed_channels TEXT DEFAULT '[]'
     );
   `);
-  // Global preferences for all users/servers
+  // Global preferences for all users and servers.
   db.run(`
     CREATE TABLE IF NOT EXISTS global_preferences (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       preference TEXT
     );
   `);
-  // User remember table for personal info
+  // User remember data for personal info.
   db.run(`
     CREATE TABLE IF NOT EXISTS user_remember (
       user_id TEXT PRIMARY KEY,
@@ -131,7 +125,7 @@ db.serialize(() => {
       likes TEXT
     );
   `);
-  // Media library to store info on memes/gifs
+  // Media library to store memes/gifs info.
   db.run(`
     CREATE TABLE IF NOT EXISTS media_library (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -144,36 +138,61 @@ db.serialize(() => {
 });
 
 /********************************************************************
+ * SECTION 3.1: SERVER SETTINGS HELPER FUNCTIONS
+ ********************************************************************/
+async function setGuildChat(guildId, enabled) {
+  await dbRun(
+    `INSERT INTO server_settings (guild_id, chat_enabled, allowed_channels)
+     VALUES (?, ?, '[]')
+     ON CONFLICT(guild_id) DO UPDATE SET chat_enabled = ?`,
+    [guildId, enabled ? 1 : 0, enabled ? 1 : 0]
+  );
+}
+
+async function getGuildSettings(guildId) {
+  const rows = await dbQuery(
+    "SELECT chat_enabled, allowed_channels FROM server_settings WHERE guild_id = ?",
+    [guildId]
+  );
+  if (rows.length === 0) return { chat_enabled: 1, allowed_channels: [] };
+  let allowed_channels = [];
+  try {
+    allowed_channels = JSON.parse(rows[0].allowed_channels);
+    if (!Array.isArray(allowed_channels)) allowed_channels = [];
+  } catch (e) {
+    allowed_channels = [];
+  }
+  return { chat_enabled: rows[0].chat_enabled, allowed_channels };
+}
+
+async function updateGuildAllowedChannels(guildId, channels) {
+  await dbRun(
+    `INSERT INTO server_settings (guild_id, chat_enabled, allowed_channels)
+     VALUES (?, 1, ?)
+     ON CONFLICT(guild_id) DO UPDATE SET allowed_channels = ?`,
+    [guildId, JSON.stringify(channels), JSON.stringify(channels)]
+  );
+}
+
+/********************************************************************
  * SECTION 4: BOT CONFIGURATION, MOOD & BASE BEHAVIOUR INSTRUCTIONS
  ********************************************************************/
-const allowedMoods = [
-  "base mood",
-  "roasting",
-  "neutral",
-  "happy",
-  "sad",
-  "romantic",
-  "rizz",
-  "villain arc",
-  "chill guy"
-];
-
-// Updated preset replies for /setmood (except rizz, which stays unchanged)
+// Updated mood preset replies (except "rizz" remains unchanged)
 const moodPresetReplies = {
-  "base mood": "staying cool and composed.",
-  "roasting": "get ready for some savage burns 🗿.",
-  "neutral": "just chill, no drama.",
-  "happy": "feeling epic and radiant.",
-  "sad": "feeling low but still a boss.",
-  "romantic": "love is in the air, vibes on point.",
+  "base mood": "chill and calm, like a midnight drive.",
+  "roasting": "bring on the heat – you're about to get roasted.",
+  "neutral": "just chillin', no drama here.",
+  "happy": "vibes on max, feeling ecstatic.",
+  "sad": "in the mood, but still vibing.",
+  "romantic": "love is in the air, smooth and tender.",
   "rizz": "dripping with rizz, nobody is safe",
-  "villain arc": "embracing the dark side, let's wreak havoc.",
-  "chill guy": "laid-back vibes on point."
+  "villain arc": "embrace your dark side, let chaos reign.",
+  "chill guy": "laid-back and cool, just cruising through."
 };
 
 const baseBehaviour = `Base Behaviour:
-1. Respond like a human without repetition.
-2. Use casual, modern language.
+1. Respond as if you are human and avoid repetition.
+2. Use casual language.
 3. Adapt to the user’s tone.
 4. Prioritize relevance.
 5. Stay respectful unless provoked.
@@ -184,22 +203,28 @@ const baseBehaviour = `Base Behaviour:
 10. Keep it concise.`;
 
 const moodInstructions = {
-  "base mood": `1. Maintain a cool, composed tone.
-2. Provide clear, factual responses.
-3. Avoid slang or over-emotion.
-4. Keep it short and precise.`,
-  "roasting": `1. Adopt a savage tone.
-2. Deliver brutal, witty insults.
+  "base mood": `1. Keep it smooth and calm.
+2. Provide factual, concise responses.
+3. Use a relaxed tone.
+4. Stay objective but cool.
+5. Keep responses short and stylish.`,
+  "roasting": `1. Bring the heat with savage burns.
+2. Deliver witty, biting insults use slurs amd keep roasting.
 3. Use creative harsh language.
-4. Roast when provoked.`,
+4. Stay edgy and on point.`,
   "neutral": `1. Stay balanced and factual.
-2. Keep responses simple and clear.`,
-  "happy": `1. Exude epic, radiant positivity.
-2. Keep the tone upbeat and inspiring.`,
-  "sad": `1. Reflect a low, but strong vibe.
-2. Be sincere and introspective.`,
-  "romantic": `1. Speak with subtle passion.
-2. Use evocative and warm language.`,
+2. Keep it simple and clear.
+3. Avoid dramatics.
+4. Be consistent.`,
+  "happy": `1. Exude high-energy vibes.
+2. Use joyful, upbeat language.
+3. Keep the mood light and fun.`,
+  "sad": `1. Reflect a mellow, introspective tone.
+2. Use gentle, empathetic language.
+3. Express sincere emotion quietly.`,
+  "romantic": `1. Speak poetically with flair.
+2. Use evocative and tender language.
+3. Keep it smooth and alluring.`,
   "rizz": `1. Exude modern charisma.
 2. Use confident language.
 3. Employ modern slang.
@@ -210,32 +235,34 @@ const moodInstructions = {
 8. Maintain street-smart flair.
 9. Radiate charm.
 10. Keep it energetic.`,
-  "villain arc": `1. Adopt a menacing tone.
-2. Use ultra–offensive language and roast everyone and use gen-z words like nigga,fuck,asshole,dumb,nuh uh,idc,etc.
-3. Let aggression show.
-4. Embrace your dark side.`,
-  "chill guy": `1. Keep it laid-back.
-2. Use casual language.
-3. Stay calm and friendly.`
+  "villain arc": `1. Embrace your dark side.
+2. Use menacing, off–beat language.
+3. Let aggression shine through.
+4. Keep the chaos alive and roast very hardly and use gen-z words like nigga,bitch,asshole,dawg,idc,nuh uh,etc.`,
+  "chill guy": `1. Stay laid–back and cool.
+2. Use casual, effortless language.
+3. Keep it friendly and relaxed.`
 };
 
 const botBaseInstructions = `
 you're haryaksh pratap.
 you're 14 years old.
+you're a male.
+you're a straight person.
 you live in Ahmedabad, Gujrat India.
 you're a good person.
-you remember past conversations and personal info.
+you remember past conversations.
 you roast only when provoked.
 you use occasional racial slurs if attacked.
 you're not repetitive.
 you love food and garba.
-you use web search when needed.
-your favourite games include roblox and minecraft.
+you use web search when asked a question which requires real time information.
+your favourite games include roblox and minecraft and in roblxo you play Build a Boat for Treasure, Blox Fruits, AUT and Fisch.
 you can access the internet.
 your roblox name is red.
 you're a savage sigma male with sarcasm.
 your best friends are butter and ankit.
-use these emojis often: 🗿💀🔥.
+you mostly use these emojis but you also use other too: 🗿💀🔥.
 speak in lower case.
 be polite unless provoked.
 adapt your tone to the user's mood and preferences.
@@ -271,45 +298,18 @@ client.on("warn", (info) => console.warn("Client Warning:", info));
 /********************************************************************
  * SECTION 7: GLOBAL STATE & HELPER FUNCTIONS
  ********************************************************************/
-const conversationTracker = new Map(); // Keyed by channel ID
+const conversationTracker = new Map(); // key: channelId, value: { count, participants }
 const userContinuousReply = new Map(); // per-user continuous reply setting
+// To track last bot message for meme/gif search and for global announcements.
 let lastBotMessageContent = "";
 let lastReply = "";
 const botMessageIds = new Set();
+// To track the last active text channel per guild.
+const lastActiveChannel = new Map();
 
 function getRandomElement(arr) {
   return arr[Math.floor(Math.random() * arr.length)];
 }
-
-// Preset responses for /start and /stop commands
-const startSuccessReplies = [
-  "alright, i'm awake 🔥",
-  "ready to roll, let's get it!",
-  "i'm online and ready to chat.",
-  "back in action, let's do this!",
-  "here i am, time to chat."
-];
-const startAlreadyReplies = [
-  "i'm already here, dumbahh 💀",
-  "what, did you think i wasn't online?",
-  "already online, genius.",
-  "yo, i'm chillin' here already.",
-  "i'm here, no need to start me again."
-];
-const stopSuccessReplies = [
-  "chat halted, enjoy the silence.",
-  "i'm off, catch you later.",
-  "going offline for now, peace out.",
-  "deactivated here 😔",
-  "silence achieved – i'm stopped."
-];
-const stopAlreadyReplies = [
-  "i'm already done, no need to stop me twice.",
-  "chill, i'm already in sleep mode.",
-  "i'm not chatting here, already stopped.",
-  "already paused, genius.",
-  "stop already in effect, dude."
-];
 
 /********************************************************************
  * SECTION 8: FETCH FUNCTIONS FOR MEMES, GIFS, & WEB SEARCH
@@ -376,7 +376,6 @@ async function performWebSearch(query) {
   }
 }
 
-// Store media details in the database
 async function storeMedia(type, url, name) {
   try {
     await dbRun("INSERT INTO media_library (type, url, name) VALUES (?, ?, ?)", [type, url, name]);
@@ -412,7 +411,6 @@ function updateConversationTracker(message) {
 }
 
 function shouldReply(message) {
-  // Use per-user continuous reply if enabled
   if (userContinuousReply.get(message.author.id)) return true;
   const lower = message.content.toLowerCase();
   if (lower.includes("red") || lower.includes("haryaksh")) {
@@ -429,15 +427,14 @@ function shouldReply(message) {
 }
 
 /********************************************************************
- * SECTION 10: GEMINI CHAT FUNCTION (WITH MOOD, REMEMBERED INFO, WEB SEARCH 
- *              & OLD CONVERSATION CONTEXT)
+ * SECTION 10: GEMINI CHAT FUNCTION (WITH MOOD, REMEMBERED INFO, OLD CONTEXT)
  ********************************************************************/
 async function chatWithGemini(userId, userMessage) {
   try {
     const rows = await dbQuery("SELECT content FROM chat_messages ORDER BY timestamp DESC LIMIT 100");
     const recentChat = rows.reverse().map(r => r.content).join("\n");
 
-    // Fetch old conversation context using keywords
+    // Fetch old conversation context using keywords from current message.
     const words = userMessage.split(/\s+/).filter(word => word.length > 3);
     let oldContext = "";
     if (words.length > 0) {
@@ -449,16 +446,23 @@ async function chatWithGemini(userId, userMessage) {
       }
     }
 
-    // Retrieve user data and mood info
+    // Fetch user's remembered info.
+    const rememberRows = await dbQuery("SELECT * FROM user_remember WHERE user_id = ?", [userId]);
+    let rememberedInfo = "";
+    if (rememberRows.length > 0) {
+      const row = rememberRows[0];
+      rememberedInfo = `Remembered Info: Name: ${row.name || "N/A"}, Birthday: ${row.birthday || "N/A"}, Gender: ${row.gender || "N/A"}, Dislikes: ${row.dislikes || "N/A"}, Likes: ${row.likes || "N/A"}.`;
+    }
+
     const userRows = await dbQuery("SELECT preferences, username, behavior FROM user_data WHERE user_id = ?", [userId]);
     const userPreferences = userRows[0]?.preferences || "[]";
     const username = userRows[0]?.username || "user";
 
     const moodRows = await dbQuery("SELECT mood FROM mood_data WHERE user_id = ?", [userId]);
     let userMood = moodRows[0]?.mood || "neutral";
-    // Use global mood if enabled
-    if (globalMoodEnabled) {
-      userMood = globalMood;
+    // Override with global custom mood if enabled.
+    if (globalCustomMood.enabled && globalCustomMood.mood) {
+      userMood = globalCustomMood.mood;
     }
     const moodExtra = moodInstructions[userMood] || "";
     
@@ -482,6 +486,7 @@ User (${username}): ${userMessage}
 Current mood: ${userMood}
 User tone: ${tone}
 User preferences: ${userPreferences}
+${rememberedInfo}
 ${webSearchSection}
 Reply (be modern, witty, and brutally offensive if appropriate; keep reply under 40 words):`;
 
@@ -511,8 +516,8 @@ Reply (be modern, witty, and brutally offensive if appropriate; keep reply under
  ********************************************************************/
 async function setMood(userId, mood) {
   mood = mood.toLowerCase();
-  if (!allowedMoods.includes(mood)) {
-    return `Invalid mood. Available moods: ${allowedMoods.join(", ")}`;
+  if (!Object.keys(moodPresetReplies).includes(mood)) {
+    return `Invalid mood. Available moods: ${Object.keys(moodPresetReplies).join(", ")}`;
   }
   try {
     await dbRun("INSERT OR IGNORE INTO mood_data (user_id, mood) VALUES (?, ?)", [userId, mood]);
@@ -562,7 +567,7 @@ async function removePreference(userId, indexToRemove) {
     }
     if (indexToRemove < 0 || indexToRemove >= prefs.length) {
       return { success: false, message: "Invalid preference index." };
-   }
+    }
     const removed = prefs.splice(indexToRemove, 1)[0];
     await dbRun("UPDATE user_data SET preferences = ? WHERE user_id = ?", [JSON.stringify(prefs), userId]);
     return { success: true, message: `Preference removed: "${removed}"` };
@@ -597,24 +602,24 @@ async function listPreferences(userId) {
 const commands = [
   { name: "start", description: "Start the bot chatting (server-specific)" },
   { name: "stop", description: "Stop the bot from chatting (server-specific)" },
-  { 
-    name: "setmood", 
-    description: "Set your mood (user-based)", 
+  {
+    name: "setmood",
+    description: "Set your mood (user-based)",
     options: [
-      { name: "mood", type: 3, description: "Your mood", required: true, choices: allowedMoods.map(mood => ({ name: mood, value: mood })) }
+      { name: "mood", type: 3, description: "Your mood", required: true, choices: Object.keys(moodPresetReplies).map(mood => ({ name: mood, value: mood })) }
     ]
   },
-  { 
-    name: "setpref", 
-    description: "Add a preference (user-based)", 
+  {
+    name: "setpref",
+    description: "Add a preference (user-based)",
     options: [
       { name: "preference", type: 3, description: "Your preference", required: true }
     ]
   },
   { name: "prefremove", description: "View and remove your preferences" },
-  { 
-    name: "contreply", 
-    description: "Enable or disable continuous reply (user-based)", 
+  {
+    name: "contreply",
+    description: "Enable or disable continuous reply (user-based)",
     options: [
       { name: "mode", type: 3, description: "Choose enable or disable", required: true, choices: [
         { name: "enable", value: "enable" },
@@ -622,22 +627,6 @@ const commands = [
       ] }
     ]
   },
-  // New commands for direct meme and gif fetching
-  {
-    name: "meme",
-    description: "Fetch a meme from Reddit",
-    options: [
-      { name: "keyword", type: 3, description: "Keyword to search for", required: false }
-    ]
-  },
-  {
-    name: "gif",
-    description: "Fetch a gif from Tenor",
-    options: [
-      { name: "keyword", type: 3, description: "Keyword to search for", required: false }
-    ]
-  },
-  // Extended debug commands with new actions
   {
     name: "debug",
     description: "Debug commands (only for _imgeno)",
@@ -664,12 +653,11 @@ const commands = [
           { name: "database", value: "database" }
         ]
       },
-      {
-        type: 3,
-        name: "value",
-        description: "Additional value or parameter",
-        required: false
-      }
+      { name: "value", type: 3, description: "Optional value for the action", required: false },
+      // Additional options for database action.
+      { name: "folder", type: 3, description: "Folder name (for database action)", required: false },
+      { name: "server", type: 3, description: "Server ID (for database action)", required: false },
+      { name: "channel", type: 3, description: "Channel ID (for database action)", required: false }
     ]
   },
   {
@@ -701,13 +689,21 @@ const commands = [
   },
   {
     name: "unremember",
-    description: "Remove your stored personal info (interactive menu if no options provided)",
+    description: "Remove your stored personal info (interactive menu)",
+    // No options; the bot will display a select menu based on stored info.
+  },
+  {
+    name: "meme",
+    description: "Fetch a meme from Reddit directly",
     options: [
-      { name: "name", type: 3, description: "Remove your name", required: false },
-      { name: "birthday", type: 3, description: "Remove your birthday", required: false },
-      { name: "gender", type: 3, description: "Remove your gender", required: false },
-      { name: "dislikes", type: 3, description: "Remove your dislikes", required: false },
-      { name: "likes", type: 3, description: "Remove your likes", required: false }
+      { name: "keyword", type: 3, description: "Optional search keyword", required: false }
+    ]
+  },
+  {
+    name: "gif",
+    description: "Fetch a gif from Tenor directly",
+    options: [
+      { name: "keyword", type: 3, description: "Optional search keyword", required: false }
     ]
   }
 ];
@@ -728,12 +724,12 @@ const rest = new REST({ version: "10" }).setToken(DISCORD_TOKEN);
  ********************************************************************/
 client.on("interactionCreate", async (interaction) => {
   try {
-    // If global chat is off, only allow debug commands
+    // If global chat is off, only allow /debug commands.
     if (!globalChatEnabled && interaction.commandName !== "debug") {
-      await interaction.reply({ content: "Global chat is disabled. Only debug commands are allowed.", ephemeral: true });
+      await interaction.reply({ content: "Global chat is disabled. Only /debug commands are allowed.", ephemeral: true });
       return;
     }
-    // For guild commands (non-debug) when chat is stopped, show "start red first" message
+    // For guild commands, if chat is stopped (via /stop), only /start and /debug are allowed.
     if (interaction.guild && interaction.commandName !== "start" && interaction.commandName !== "debug") {
       const settings = await getGuildSettings(interaction.guild.id);
       if (settings.chat_enabled !== 1) {
@@ -741,30 +737,36 @@ client.on("interactionCreate", async (interaction) => {
         return;
       }
     }
-
     if (interaction.isCommand()) {
       const { commandName } = interaction;
-      // Ensure server-only commands are used in guilds
       if ((commandName === "start" || commandName === "stop" || commandName === "set") && !interaction.guild) {
         await interaction.reply({ content: "This command can only be used in a server.", ephemeral: true });
         return;
       }
       if (commandName === "start") {
+        // Check if already started.
         const settings = await getGuildSettings(interaction.guild.id);
         if (settings.chat_enabled === 1) {
-          await interaction.reply({ content: getRandomElement(startAlreadyReplies), ephemeral: true });
-        } else {
-          await setGuildChat(interaction.guild.id, true);
-          await interaction.reply({ content: getRandomElement(startSuccessReplies), ephemeral: true });
+          const alreadyOnReplies = [
+            "i'm already here dumbahh 💀",
+            "you already got me, genius 💀",
+            "i'm still around, stop summoning me again 💀",
+            "i'm online, no need to call twice 💀",
+            "i'm here, idiot."
+          ];
+          await interaction.reply({ content: getRandomElement(alreadyOnReplies), ephemeral: true });
+          return;
         }
+        await setGuildChat(interaction.guild.id, true);
+        await interaction.reply({ content: getRandomElement([
+          "alright, i'm awake 🔥",
+          "already here, dawg 💀",
+          "yoo, i'm online.",
+          "ready to chat."
+        ]), ephemeral: true });
       } else if (commandName === "stop") {
-        const settings = await getGuildSettings(interaction.guild.id);
-        if (settings.chat_enabled !== 1) {
-          await interaction.reply({ content: getRandomElement(stopAlreadyReplies), ephemeral: true });
-        } else {
-          await setGuildChat(interaction.guild.id, false);
-          await interaction.reply({ content: getRandomElement(stopSuccessReplies), ephemeral: true });
-        }
+        await setGuildChat(interaction.guild.id, false);
+        await interaction.reply({ content: "alright I go 😔", ephemeral: true });
       } else if (commandName === "setmood") {
         const mood = interaction.options.getString("mood").toLowerCase();
         const response = await setMood(interaction.user.id, mood);
@@ -798,82 +800,6 @@ client.on("interactionCreate", async (interaction) => {
             : "Back to normal reply behavior for you.",
           ephemeral: true
         });
-      } else if (commandName === "meme") {
-        const keyword = interaction.options.getString("keyword") || "funny";
-        const memeObj = await getRandomMeme(keyword);
-        await interaction.reply({ content: memeObj.url });
-      } else if (commandName === "gif") {
-        const keyword = interaction.options.getString("keyword") || "funny";
-        const gifObj = await getRandomGif(keyword);
-        await interaction.reply({ content: gifObj.url });
-      } else if (commandName === "remember") {
-        const fields = ["name", "birthday", "gender", "dislikes", "likes"];
-        let updates = {};
-        fields.forEach(field => {
-          const value = interaction.options.getString(field);
-          if (value) updates[field] = value;
-        });
-        if (Object.keys(updates).length === 0) {
-          await interaction.reply({ content: "Please provide at least one field to remember.", ephemeral: true });
-          return;
-        }
-        const existing = await dbQuery("SELECT * FROM user_remember WHERE user_id = ?", [interaction.user.id]);
-        if (existing.length === 0) {
-          await dbRun("INSERT INTO user_remember (user_id, name, birthday, gender, dislikes, likes) VALUES (?, ?, ?, ?, ?, ?)", [
-            interaction.user.id,
-            updates.name || null,
-            updates.birthday || null,
-            updates.gender || null,
-            updates.dislikes || null,
-            updates.likes || null
-          ]);
-        } else {
-          for (const field in updates) {
-            await dbRun(`UPDATE user_remember SET ${field} = ? WHERE user_id = ?`, [updates[field], interaction.user.id]);
-          }
-        }
-        await interaction.reply({ content: "Your personal info has been remembered.", ephemeral: true });
-      } else if (commandName === "unremember") {
-        // If any field is provided, remove those; otherwise, show interactive menu
-        const fields = ["name", "birthday", "gender", "dislikes", "likes"];
-        let provided = false;
-        for (const field of fields) {
-          if (interaction.options.getString(field)) {
-            provided = true;
-            break;
-          }
-        }
-        if (provided) {
-          for (const field of fields) {
-            if (interaction.options.getString(field) !== null) {
-              await dbRun(`UPDATE user_remember SET ${field} = NULL WHERE user_id = ?`, [interaction.user.id]);
-            }
-          }
-          await interaction.reply({ content: "Specified personal info has been removed.", ephemeral: true });
-        } else {
-          // Interactive menu: fetch current remembered info and let user select which field to remove
-          const row = (await dbQuery("SELECT * FROM user_remember WHERE user_id = ?", [interaction.user.id]))[0];
-          if (!row) {
-            await interaction.reply({ content: "No personal info stored.", ephemeral: true });
-            return;
-          }
-          let options = [];
-          for (const field of fields) {
-            if (row[field]) {
-              options.push({ label: `${field}: ${row[field]}`, value: field });
-            }
-          }
-          if (options.length === 0) {
-            await interaction.reply({ content: "Nothing to remove.", ephemeral: true });
-            return;
-          }
-          const selectMenu = new StringSelectMenuBuilder()
-            .setCustomId("unremember_select")
-            .setPlaceholder("Select info to remove")
-            .addOptions(options);
-          const menuRow = new ActionRowBuilder().addComponents(selectMenu);
-          await interaction.reply({ content: "Select the info to remove:", components: [menuRow], ephemeral: true });
-        }
       } else if (commandName === "debug") {
         if (interaction.user.username !== "_imgeno") {
           await interaction.reply({ content: "Access denied.", ephemeral: true });
@@ -895,20 +821,24 @@ client.on("interactionCreate", async (interaction) => {
             await interaction.reply({ content: "Conversation memory reset.", ephemeral: true });
             break;
           case "getstats": {
-            // Group conversationTracker data by guild
-            let guildStats = {};
+            // Group conversationTracker by guild.
+            const stats = {};
             for (const [channelId, data] of conversationTracker.entries()) {
               const channel = client.channels.cache.get(channelId);
               if (channel && channel.guild) {
                 const guildId = channel.guild.id;
-                if (!guildStats[guildId]) {
-                  guildStats[guildId] = { name: channel.guild.name, count: 0 };
+                if (!stats[guildId]) {
+                  stats[guildId] = { name: channel.guild.name, count: 0 };
                 }
-                guildStats[guildId].count += data.participants.size;
+                stats[guildId].count += data.participants.size;
               }
             }
-            const statsMsg = Object.entries(guildStats).map(([id, info]) => `${info.name} (${id}): ${info.count} active participants`).join("\n") || "No active conversations.";
-            await interaction.reply({ content: `Stats:\n${statsMsg}`, ephemeral: true });
+            let statMsg = "Active conversations by server:\n";
+            for (const guildId in stats) {
+              statMsg += `${stats[guildId].name} (${guildId}): ${stats[guildId].count} active users\n`;
+            }
+            if (statMsg === "Active conversations by server:\n") statMsg = "No active conversations.";
+            await interaction.reply({ content: statMsg, ephemeral: true });
             break;
           }
           case "listusers": {
@@ -923,7 +853,7 @@ client.on("interactionCreate", async (interaction) => {
             break;
           case "globalchat_off":
             globalChatEnabled = false;
-            await interaction.reply({ content: "Global chat is now OFF. Only debug commands are allowed.", ephemeral: true });
+            await interaction.reply({ content: "Global chat is now OFF. Only debug commands can be used.", ephemeral: true });
             break;
           case "globalprefadd": {
             if (!value) {
@@ -935,40 +865,39 @@ client.on("interactionCreate", async (interaction) => {
             break;
           }
           case "globalprefremove": {
-            // If value provided, remove that preference; otherwise, show interactive menu
-            const globalPrefs = await dbQuery("SELECT id, preference FROM global_preferences");
+            // If value is provided, remove it directly.
             if (value) {
               await dbRun("DELETE FROM global_preferences WHERE preference = ?", [value]);
               await interaction.reply({ content: `Global preference removed: "${value}" (if it existed)`, ephemeral: true });
             } else {
-              if (globalPrefs.length === 0) {
-                await interaction.reply({ content: "No global preferences set.", ephemeral: true });
+              // Else show interactive select menu.
+              const rows = await dbQuery("SELECT id, preference FROM global_preferences");
+              if (rows.length === 0) {
+                await interaction.reply({ content: "No global preferences to remove.", ephemeral: true });
                 return;
               }
-              const options = globalPrefs.map(pref => ({
-                label: pref.preference.length > 25 ? pref.preference.substring(0, 22) + "..." : pref.preference,
-                value: pref.id.toString()
+              const options = rows.map(row => ({
+                label: row.preference.length > 25 ? row.preference.substring(0,22) + "..." : row.preference,
+                value: row.id.toString()
               }));
               const selectMenu = new StringSelectMenuBuilder()
                 .setCustomId("globalprefremove_select")
                 .setPlaceholder("Select a global preference to remove")
                 .addOptions(options);
-              const row = new ActionRowBuilder().addComponents(selectMenu);
-              await interaction.reply({ content: "Select a global preference to remove:", components: [row], ephemeral: true });
+              const rowComp = new ActionRowBuilder().addComponents(selectMenu);
+              await interaction.reply({ content: "Select a global preference to remove:", components: [rowComp], ephemeral: true });
             }
             break;
           }
           case "log": {
-            // Read the error.log file and show the last 10 lines
-            fs.readFile("error.log", "utf8", (err, data) => {
-              if (err) {
-                interaction.reply({ content: "Unable to read log file.", ephemeral: true });
-              } else {
-                const lines = data.trim().split("\n");
-                const lastLines = lines.slice(-10).join("\n");
-                interaction.reply({ content: `Last 10 log entries:\n${lastLines}`, ephemeral: true });
-              }
-            });
+            try {
+              const logContent = fs.readFileSync("error.log", "utf8");
+              const lines = logContent.trim().split("\n");
+              const last20 = lines.slice(-20).join("\n") || "No logs available.";
+              await interaction.reply({ content: `Last 20 log lines:\n${last20}`, ephemeral: true });
+            } catch (err) {
+              await interaction.reply({ content: "Error reading log file.", ephemeral: true });
+            }
             break;
           }
           case "globalannounce": {
@@ -976,70 +905,70 @@ client.on("interactionCreate", async (interaction) => {
               await interaction.reply({ content: "Please provide an announcement message.", ephemeral: true });
               return;
             }
+            // Send announcement to each guild's last active channel or systemChannel.
             client.guilds.cache.forEach(async (guild) => {
-              try {
-                // Attempt to send to the system channel first; if not available, pick the first text channel where the bot has SEND_MESSAGES permission.
-                let targetChannel = guild.systemChannel;
-                if (!targetChannel) {
-                  targetChannel = guild.channels.cache.find(ch => ch.type === ChannelType.GuildText && ch.permissionsFor(guild.members.me).has(PermissionsBitField.Flags.SendMessages));
-                }
-                if (targetChannel) {
+              let targetChannel = lastActiveChannel.get(guild.id);
+              if (!targetChannel) targetChannel = guild.systemChannel;
+              if (targetChannel) {
+                try {
                   await targetChannel.send(value);
+                } catch (err) {
+                  advancedErrorHandler(err, "Global Announcement");
                 }
-              } catch (e) {
-                advancedErrorHandler(e, `Global Announcement in ${guild.id}`);
               }
             });
             await interaction.reply({ content: "Global announcement sent.", ephemeral: true });
             break;
           }
           case "status": {
-            const statusMsg = client.ws ? "Bot is online." : "Bot appears offline.";
+            const statusMsg = `Bot is online.
+Global chat: ${globalChatEnabled ? "ON" : "OFF"}.
+Global custom mood: ${globalCustomMood.enabled ? globalCustomMood.mood : "disabled"}.`;
             await interaction.reply({ content: statusMsg, ephemeral: true });
             break;
           }
           case "globalmood": {
             if (!value) {
-              await interaction.reply({ content: "Please specify 'enable <mood>' or 'disable'.", ephemeral: true });
+              await interaction.reply({ content: "Please provide 'enable <mood>' or 'disable'.", ephemeral: true });
               return;
             }
-            const parts = value.split(" ");
-              if (parts[0].toLowerCase() === "disable") {
-              globalMoodEnabled = false;
-              await interaction.reply({ content: "Global custom mood disabled. Reverting to user-based mood.", ephemeral: true });
-            } else if (parts[0].toLowerCase() === "enable") {
-              const mood = parts.slice(1).join(" ").toLowerCase();
-              if (!allowedMoods.includes(mood)) {
-                await interaction.reply({ content: `Invalid mood. Available moods: ${allowedMoods.join(", ")}`, ephemeral: true });
+            if (value.toLowerCase().startsWith("enable")) {
+              const parts = value.split(" ");
+              if (parts.length < 2) {
+                await interaction.reply({ content: "Please specify a mood to enable.", ephemeral: true });
                 return;
               }
-              globalMoodEnabled = true;
-              globalMood = mood;
+              const mood = parts.slice(1).join(" ").toLowerCase();
+              if (!Object.keys(moodPresetReplies).includes(mood)) {
+                await interaction.reply({ content: `Invalid mood. Available moods: ${Object.keys(moodPresetReplies).join(", ")}`, ephemeral: true });
+                return;
+              }
+              globalCustomMood.enabled = true;
+              globalCustomMood.mood = mood;
               await interaction.reply({ content: `Global custom mood enabled: ${mood}`, ephemeral: true });
+            } else if (value.toLowerCase() === "disable") {
+              globalCustomMood.enabled = false;
+              globalCustomMood.mood = null;
+              await interaction.reply({ content: "Global custom mood disabled. Using user-based moods.", ephemeral: true });
             } else {
-              await interaction.reply({ content: "Invalid parameter. Use 'enable <mood>' or 'disable'.", ephemeral: true });
+              await interaction.reply({ content: "Invalid value. Use 'enable <mood>' or 'disable'.", ephemeral: true });
             }
             break;
           }
           case "database": {
-            if (!value) {
-              await interaction.reply({ content: "Specify 'folder', 'server:<id>' or 'channel:<id>'", ephemeral: true });
-              return;
-            }
-            if (value.toLowerCase() === "folder") {
-              await interaction.reply({ content: "Database file: chat.db", ephemeral: true });
-            } else if (value.toLowerCase().startsWith("server:")) {
-              const serverId = value.split(":")[1];
-              const msgs = await dbQuery("SELECT content, timestamp FROM chat_messages WHERE guild_id = ? ORDER BY timestamp DESC LIMIT 10", [serverId]);
-              const msgList = msgs.map(m => `[${m.timestamp}] ${m.content}`).join("\n") || "No messages found.";
-              await interaction.reply({ content: `Messages from server ${serverId}:\n${msgList}`, ephemeral: true });
-            } else if (value.toLowerCase().startsWith("channel:")) {
-              const channelId = value.split(":")[1];
-              const msgs = await dbQuery("SELECT content, timestamp FROM chat_messages WHERE channel_id = ? ORDER BY timestamp DESC LIMIT 10", [channelId]);
-              const msgList = msgs.map(m => `[${m.timestamp}] ${m.content}`).join("\n") || "No messages found.";
-              await interaction.reply({ content: `Messages from channel ${channelId}:\n${msgList}`, ephemeral: true });
+            const folder = interaction.options.getString("folder");
+            const serverId = interaction.options.getString("server");
+            const channelId = interaction.options.getString("channel");
+            if (folder && folder.toLowerCase() === "chat" && channelId) {
+              const messages = await dbQuery("SELECT * FROM chat_messages WHERE channel_id = ? AND user = ? ORDER BY timestamp DESC LIMIT 20", [channelId, client.user.id]);
+              if (messages.length === 0) {
+                await interaction.reply({ content: "No bot messages found for that channel.", ephemeral: true });
+              } else {
+                const msgList = messages.map(m => `[${m.timestamp}] ${m.content}`).join("\n");
+                await interaction.reply({ content: `Bot messages in channel ${channelId}:\n${msgList}`, ephemeral: true });
+              }
             } else {
-              await interaction.reply({ content: "Invalid parameter for database action.", ephemeral: true });
+              await interaction.reply({ content: "Please provide folder='chat' and a valid channel ID.", ephemeral: true });
             }
             break;
           }
@@ -1048,7 +977,6 @@ client.on("interactionCreate", async (interaction) => {
             break;
         }
       } else if (commandName === "set") {
-        // New server configuration command
         if (!interaction.member.permissions.has(PermissionsBitField.Flags.Administrator) && !interaction.member.permissions.has(PermissionsBitField.Flags.ManageGuild)) {
           await interaction.reply({ content: "Insufficient permissions. Requires Administrator or Manage Server.", ephemeral: true });
           return;
@@ -1088,6 +1016,67 @@ client.on("interactionCreate", async (interaction) => {
           const row = new ActionRowBuilder().addComponents(selectMenu);
           await interaction.reply({ content: "Select a channel to remove:", components: [row], ephemeral: true });
         }
+      } else if (commandName === "remember") {
+        const fields = ["name", "birthday", "gender", "dislikes", "likes"];
+        let updates = {};
+        fields.forEach(field => {
+          const valueField = interaction.options.getString(field);
+          if (valueField) updates[field] = valueField;
+        });
+        if (Object.keys(updates).length === 0) {
+          await interaction.reply({ content: "Please provide at least one field to remember.", ephemeral: true });
+          return;
+        }
+        const existing = await dbQuery("SELECT * FROM user_remember WHERE user_id = ?", [interaction.user.id]);
+        if (existing.length === 0) {
+          await dbRun("INSERT INTO user_remember (user_id, name, birthday, gender, dislikes, likes) VALUES (?, ?, ?, ?, ?, ?)", [
+            interaction.user.id,
+            updates.name || null,
+            updates.birthday || null,
+            updates.gender || null,
+            updates.dislikes || null,
+            updates.likes || null
+          ]);
+        } else {
+          for (const field in updates) {
+            await dbRun(`UPDATE user_remember SET ${field} = ? WHERE user_id = ?`, [updates[field], interaction.user.id]);
+          }
+        }
+        await interaction.reply({ content: "Your personal info has been remembered.", ephemeral: true });
+      } else if (commandName === "unremember") {
+        // Interactive menu: show which fields are stored.
+        const rowData = await dbQuery("SELECT * FROM user_remember WHERE user_id = ?", [interaction.user.id]);
+        if (rowData.length === 0) {
+          await interaction.reply({ content: "You have no remembered info.", ephemeral: true });
+          return;
+        }
+        const data = rowData[0];
+        const options = [];
+        for (const field of ["name", "birthday", "gender", "dislikes", "likes"]) {
+          if (data[field]) {
+            options.push({ label: `${field}: ${data[field]}`, value: field });
+          }
+        }
+        if (options.length === 0) {
+          await interaction.reply({ content: "Nothing to unremember.", ephemeral: true });
+          return;
+        }
+        const selectMenu = new StringSelectMenuBuilder()
+          .setCustomId("unremember_select")
+          .setPlaceholder("Select a field to remove")
+          .addOptions(options);
+        const row = new ActionRowBuilder().addComponents(selectMenu);
+        await interaction.reply({ content: "Select a field to remove from your remembered info:", components: [row], ephemeral: true });
+      } else if (commandName === "meme") {
+        const keyword = interaction.options.getString("keyword") || "funny";
+        const memeObj = await getRandomMeme(keyword);
+        await interaction.reply({ content: memeObj.url });
+        await storeMedia("meme", memeObj.url, memeObj.name);
+      } else if (commandName === "gif") {
+        const keyword = interaction.options.getString("keyword") || "funny";
+        const gifObj = await getRandomGif(keyword);
+        await interaction.reply({ content: gifObj.url });
+        await storeMedia("gif", gifObj.url, gifObj.name);
       }
     } else if (interaction.isStringSelectMenu()) {
       if (interaction.customId === "prefremove_select") {
@@ -1100,8 +1089,8 @@ client.on("interactionCreate", async (interaction) => {
         const removed = await removePreference(interaction.user.id, selectedIndex);
         await interaction.update({ content: removed.message, components: [] });
       } else if (interaction.customId === "globalprefremove_select") {
-        const prefId = interaction.values[0];
-        await dbRun("DELETE FROM global_preferences WHERE id = ?", [prefId]);
+        const selectedId = parseInt(interaction.values[0], 10);
+        await dbRun("DELETE FROM global_preferences WHERE id = ?", [selectedId]);
         await interaction.update({ content: "Global preference removed.", components: [] });
       } else if (interaction.customId === "setchannel_select") {
         const selectedChannelId = interaction.values[0];
@@ -1128,7 +1117,7 @@ client.on("interactionCreate", async (interaction) => {
       } else if (interaction.customId === "unremember_select") {
         const field = interaction.values[0];
         await dbRun(`UPDATE user_remember SET ${field} = NULL WHERE user_id = ?`, [interaction.user.id]);
-        await interaction.update({ content: `Removed your ${field}.`, components: [] });
+        await interaction.update({ content: `Removed your ${field} from remembered info.`, components: [] });
       }
     }
   } catch (error) {
@@ -1148,49 +1137,21 @@ client.on("interactionCreate", async (interaction) => {
  ********************************************************************/
 client.on("messageCreate", async (message) => {
   try {
-    // If global chat is disabled, do not process non-debug messages.
+    // Update last active channel per guild.
+    if (message.guild && message.channel.type === ChannelType.GuildText) {
+      lastActiveChannel.set(message.guild.id, message.channel);
+    }
+    // If global chat is off, do not process non-debug messages.
     if (!globalChatEnabled) return;
-
-    // Special commands: show info about the last gif/meme if asked
-    if (/what(?:'s| is) in the gif/i.test(message.content)) {
-      const rows = await dbQuery("SELECT name FROM media_library WHERE type = ? ORDER BY id DESC LIMIT 1", ["gif"]);
-      if (rows.length > 0) {
-        await message.channel.send(`The gif shows: ${rows[0].name}`);
-      } else {
-        await message.channel.send("I don't have info on the last gif.");
-      }
-      return;
-    }
-    if (/what(?:'s| is) in the meme/i.test(message.content)) {
-      const rows = await dbQuery("SELECT name FROM media_library WHERE type = ? ORDER BY id DESC LIMIT 1", ["meme"]);
-      if (rows.length > 0) {
-        await message.channel.send(`The meme is titled: ${rows[0].name}`);
-      } else {
-        await message.channel.send("I don't have info on the last meme.");
-      }
-      return;
-    }
-
-    // Save every message with guild_id and channel_id if applicable
-    await dbRun("INSERT INTO chat_messages (discord_id, guild_id, channel_id, user, content) VALUES (?, ?, ?, ?, ?)", [
-      message.id,
-      message.guild ? message.guild.id : null,
-      message.guild ? message.channel.id : null,
-      message.author.id,
-      message.content
-    ]);
-    
-    // Do not process bot's own messages
+    // Insert message with channel_id.
+    await dbRun("INSERT INTO chat_messages (discord_id, channel_id, user, content) VALUES (?, ?, ?, ?)", [message.id, message.channel.id, message.author.id, message.content]);
     if (message.author.id === client.user.id) return;
-    
-    // For guild messages, check server settings
     if (message.guild) {
       const settings = await getGuildSettings(message.guild.id);
       if (settings.chat_enabled !== 1) return;
       if (settings.allowed_channels.length > 0 && !settings.allowed_channels.includes(message.channel.id)) return;
     }
-    
-    // Trigger meme/gif sending if keywords are detected (30% chance)
+    // Trigger meme/gif sending if keywords present (30% chance)
     const triggers = ["meme", "funny", "gif"];
     if (triggers.some(t => message.content.toLowerCase().includes(t)) && Math.random() < 0.30) {
       const searchTerm = lastBotMessageContent ? lastBotMessageContent.split(" ").slice(0, 3).join(" ") : "funny";
@@ -1213,8 +1174,6 @@ client.on("messageCreate", async (message) => {
       }
       return;
     }
-    
-    // Check if the bot should reply
     if (!shouldReply(message)) return;
     const replyContent = await chatWithGemini(message.author.id, message.content);
     if (replyContent === lastReply) return;
