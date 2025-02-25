@@ -21,6 +21,9 @@ const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const TENOR_API_KEY = process.env.TENOR_API_KEY;
 const PORT = process.env.PORT || 3000;
 
+// Global chat toggle for all servers
+let globalChatEnabled = true;
+
 /********************************************************************
  * SECTION 2: ENHANCED ERROR HANDLER
  ********************************************************************/
@@ -674,6 +677,11 @@ const rest = new REST({ version: "10" }).setToken(DISCORD_TOKEN);
  ********************************************************************/
 client.on("interactionCreate", async (interaction) => {
   try {
+    // If global chat is disabled, only allow debug commands.
+    if (!globalChatEnabled && interaction.commandName !== "debug") {
+      await interaction.reply({ content: "Global chat is disabled. Only debug commands are allowed.", ephemeral: true });
+      return;
+    }
     if (interaction.isCommand()) {
       const { commandName } = interaction;
       // Server-specific commands: if the command must be used in a guild, check for guild presence.
@@ -756,21 +764,12 @@ client.on("interactionCreate", async (interaction) => {
             await interaction.reply({ content: `Users in DB:\n${userList}`, ephemeral: true });
             break;
           case "globalchat_on":
-            // For debug, update guild setting if needed
-            if (interaction.guild) {
-              await setGuildChat(interaction.guild.id, true);
-              await interaction.reply({ content: "Global chat is now ON for this server.", ephemeral: true });
-            } else {
-              await interaction.reply({ content: "This debug command can only be used in a server.", ephemeral: true });
-            }
+            globalChatEnabled = true;
+            await interaction.reply({ content: "Global chat is now ON for all servers.", ephemeral: true });
             break;
           case "globalchat_off":
-            if (interaction.guild) {
-              await setGuildChat(interaction.guild.id, false);
-              await interaction.reply({ content: "Global chat is now OFF for this server.", ephemeral: true });
-            } else {
-              await interaction.reply({ content: "This debug command can only be used in a server.", ephemeral: true });
-            }
+            globalChatEnabled = false;
+            await interaction.reply({ content: "Global chat is now OFF for all servers. Only debug commands are allowed.", ephemeral: true });
             break;
           default:
             await interaction.reply({ content: "Unknown debug command.", ephemeral: true });
@@ -877,6 +876,9 @@ client.on("interactionCreate", async (interaction) => {
  ********************************************************************/
 client.on("messageCreate", async (message) => {
   try {
+    // If global chat is disabled, do not process messages.
+    if (!globalChatEnabled) return;
+
     // Save every message (including memes/gifs) with its discord_id
     await dbRun("INSERT INTO chat_messages (discord_id, user, content) VALUES (?, ?, ?)", [message.id, message.author.id, message.content]);
     
