@@ -571,26 +571,24 @@ const commands = [
       ]}
     ]
   },
-  { 
-    name: "debug", 
-    description: "Debug commands (only _imgeno can use) - all functions in one command",
-    options: [
-      { type: 1, name: "ping", description: "Ping the bot" },
-      { type: 1, name: "restart", description: "Restart the bot" },
-      { type: 1, name: "resetmemory", description: "Reset conversation memory" },
-      { type: 1, name: "getstats", description: "Get bot statistics" },
-           { type: 1, name: "listusers", description: "List users in the database" },
-      { 
-        type: 1, 
-        name: "globalchat", 
-        description: "Set global chat on/off", 
-        options: [
-          { name: "state", type: 3, description: "Choose on or off", required: true, choices: [
-            { name: "on", value: "on" },
-            { name: "off", value: "off" }
-          ]}
-        ]
-      }
+  {
+  name: "debug",
+  description: "Debug commands (only for _imgeno)",
+  options: [
+    {
+      type: 3, // STRING type
+      name: "action",
+      description: "Choose a debug action",
+      required: true,
+      choices: [
+        { name: "ping", value: "ping" },
+        { name: "restart", value: "restart" },
+        { name: "resetmemory", value: "resetmemory" },
+        { name: "getstats", value: "getstats" },
+        { name: "listusers", value: "listusers" },
+        { name: "globalchat_on", value: "globalchat_on" },
+        { name: "globalchat_off", value: "globalchat_off" }
+      ] }
     ]
   }
 ];
@@ -663,35 +661,56 @@ client.on("interactionCreate", async (interaction) => {
           ephemeral: true
         });
       } else if (commandName === "debug") {
-        // Only allow _imgeno to use debug commands
-        if (interaction.user.username !== "_imgeno") {
-          await interaction.reply({ content: "Access denied.", ephemeral: true });
-          return;
-        }
-        const sub = interaction.options.getSubcommand();
-        if (sub === "ping") {
-          const sent = await interaction.reply({ content: "Pong!", fetchReply: true });
-          await interaction.followUp({ content: `Latency is ${sent.createdTimestamp - interaction.createdTimestamp}ms.`, ephemeral: true });
-        } else if (sub === "restart") {
-          await interaction.reply({ content: "Restarting bot...", ephemeral: true });
-          process.exit(0);
-        } else if (sub === "resetmemory") {
-          conversationTracker.clear();
-          await interaction.reply({ content: "Conversation memory reset.", ephemeral: true });
-        } else if (sub === "getstats") {
-          const stats = Array.from(conversationTracker.entries()).map(([channel, data]) => `Channel ${channel}: ${data.participants.size} active users`).join("\n") || "No active conversations.";
-          await interaction.reply({ content: `Stats:\n${stats}`, ephemeral: true });
-        } else if (sub === "listusers") {
-          const rows = await dbQuery("SELECT username, user_id FROM user_data");
-          const list = rows.map(r => `${r.username} (${r.user_id})`).join("\n") || "No users found.";
-          await interaction.reply({ content: `Users in DB:\n${list}`, ephemeral: true });
-        } else if (sub === "globalchat") {
-          const state = interaction.options.getString("state");
-          globalChat = (state === "on");
-          await interaction.reply({ content: `Global chat is now ${globalChat ? "ON" : "OFF"}.`, ephemeral: true });
-        } else {
-          await interaction.reply({ content: "Unknown debug command.", ephemeral: true });
-        }
+  if (interaction.user.username !== "_imgeno") {
+    await interaction.reply({ content: "Access denied.", ephemeral: true });
+    return;
+  }
+
+  const action = interaction.options.getString("action");
+
+  switch (action) {
+    case "ping":
+      const sent = await interaction.reply({ content: "Pong!", fetchReply: true });
+      await interaction.followUp({ content: `Latency: ${sent.createdTimestamp - interaction.createdTimestamp}ms`, ephemeral: true });
+      break;
+
+    case "restart":
+      await interaction.reply({ content: "Restarting bot...", ephemeral: true });
+      process.exit(0);
+      break;
+
+    case "resetmemory":
+      conversationTracker.clear();
+      await interaction.reply({ content: "Conversation memory reset.", ephemeral: true });
+      break;
+
+    case "getstats":
+      const stats = Array.from(conversationTracker.entries())
+        .map(([channel, data]) => `Channel ${channel}: ${data.participants.size} active users`)
+        .join("\n") || "No active conversations.";
+      await interaction.reply({ content: `Stats:\n${stats}`, ephemeral: true });
+      break;
+
+    case "listusers":
+      const users = await dbQuery("SELECT username, user_id FROM user_data");
+      const userList = users.map(r => `${r.username} (${r.user_id})`).join("\n") || "No users found.";
+      await interaction.reply({ content: `Users in DB:\n${userList}`, ephemeral: true });
+      break;
+
+    case "globalchat_on":
+      globalChat = true;
+      await interaction.reply({ content: "Global chat is now ON.", ephemeral: true });
+      break;
+
+    case "globalchat_off":
+      globalChat = false;
+      await interaction.reply({ content: "Global chat is now OFF.", ephemeral: true });
+      break;
+
+    default:
+      await interaction.reply({ content: "Unknown debug command.", ephemeral: true });
+      break;
+  }
       }
     } else if (interaction.isStringSelectMenu() && interaction.customId === "prefremove_select") {
       const selectedIndex = parseInt(interaction.values[0], 10);
