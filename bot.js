@@ -4,7 +4,7 @@
 import {
   Client, GatewayIntentBits, Partials, REST, Routes,
   ActionRowBuilder, StringSelectMenuBuilder, SlashCommandBuilder,
-  ChannelType, PermissionsBitField
+  ChannelType, PermissionsBitField, ButtonBuilder, ButtonStyle
 } from "discord.js";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import fetch from "node-fetch";
@@ -49,7 +49,6 @@ process.on("unhandledRejection", (reason) => {
 /********************************************************************
  * SECTION 3: DATABASE SETUP (INCLUDING DISCORD MESSAGE IDs)
  ********************************************************************/
-// Updated chat_messages table to store channel_id as well.
 const db = new sqlite3.Database(
   "chat.db",
   sqlite3.OPEN_READWRITE | sqlite3.OPEN_CREATE,
@@ -122,7 +121,8 @@ db.serialize(() => {
       birthday TEXT,
       gender TEXT,
       dislikes TEXT,
-      likes TEXT
+      likes TEXT,
+      about TEXT
     );
   `);
   // Media library to store memes/gifs info.
@@ -320,20 +320,44 @@ async function getRandomMeme(searchKeyword = "funny") {
     const response = await fetch(url, { headers: { "User-Agent": "red-bot/1.0" } });
     if (!response.ok) {
       console.error(`Reddit API error: ${response.status} ${response.statusText}`);
-      return { url: "couldn't fetch a meme, sorry.", name: "unknown meme" };
+      throw new Error("Reddit API error");
     }
     const data = await response.json();
     if (!data.data || !data.data.children || data.data.children.length === 0) {
-      console.error("No meme results found.");
-      return { url: "couldn't find a meme, sorry.", name: "unknown meme" };
+      console.error("No meme results found on Reddit.");
+      throw new Error("No meme results found on Reddit.");
     }
     const posts = data.data.children.filter(child => child.data && child.data.url && !child.data.over_18);
-    if (!posts.length) return { url: "couldn't find a meme, sorry.", name: "unknown meme" };
+    if (!posts.length) throw new Error("No valid meme posts on Reddit.");
     const memePost = getRandomElement(posts).data;
     return { url: memePost.url, name: memePost.title || "meme" };
   } catch (error) {
-    advancedErrorHandler(error, "getRandomMeme");
-    return { url: "couldn't fetch a meme, sorry.", name: "unknown meme" };
+    advancedErrorHandler(error, "getRandomMeme - Reddit");
+    // Fallback to iFunny
+    const fallback = await getRandomMemeFromIFunny(searchKeyword);
+    return fallback;
+  }
+}
+
+async function getRandomMemeFromIFunny(searchKeyword = "funny") {
+  try {
+    // Simulated endpoint for iFunny fallback
+    const url = `https://api.ifunny.co/memes/search?query=${encodeURIComponent(searchKeyword)}&limit=50`;
+    const response = await fetch(url, { headers: { "User-Agent": "red-bot/1.0" } });
+    if (!response.ok) {
+      console.error(`iFunny API error: ${response.status} ${response.statusText}`);
+      return { url: "couldn't fetch a meme from iFunny, sorry.", name: "unknown meme" };
+    }
+    const data = await response.json();
+    if (!data.results || data.results.length === 0) {
+      console.error("No meme results found on iFunny.");
+      return { url: "couldn't find a meme on iFunny, sorry.", name: "unknown meme" };
+    }
+    const memePost = getRandomElement(data.results);
+    return { url: memePost.imageUrl || "no image", name: memePost.title || "meme" };
+  } catch (error) {
+    advancedErrorHandler(error, "getRandomMemeFromIFunny");
+    return { url: "couldn't fetch a meme from iFunny, sorry.", name: "unknown meme" };
   }
 }
 
@@ -451,7 +475,7 @@ async function chatWithGemini(userId, userMessage) {
     let rememberedInfo = "";
     if (rememberRows.length > 0) {
       const row = rememberRows[0];
-      rememberedInfo = `Remembered Info: Name: ${row.name || "N/A"}, Birthday: ${row.birthday || "N/A"}, Gender: ${row.gender || "N/A"}, Dislikes: ${row.dislikes || "N/A"}, Likes: ${row.likes || "N/A"}.`;
+      rememberedInfo = `Remembered Info: Name: ${row.name || "N/A"}, Birthday: ${row.birthday || "N/A"}, Gender: ${row.gender || "N/A"}, Dislikes: ${row.dislikes || "N/A"}, Likes: ${row.likes || "N/A"}, About: ${row.about || "N/A"}.`;
     }
 
     const userRows = await dbQuery("SELECT preferences, username, behavior FROM user_data WHERE user_id = ?", [userId]);
@@ -507,7 +531,7 @@ Reply (be modern, witty, and brutally offensive if appropriate; keep reply under
     return reply;
   } catch (error) {
     advancedErrorHandler(error, "chatWithGemini");
-    return "something went wrong, try again.";
+    return "An error occurred while processing your request. Please try again later.";
   }
 }
 
@@ -524,7 +548,7 @@ async function setMood(userId, mood) {
     return moodPresetReplies[mood] || `Mood set to ${mood}`;
   } catch (error) {
     advancedErrorHandler(error, "setMood");
-    return "Failed to update mood, try again.";
+    return "Failed to update mood, please try again later.";
   }
 }
 
@@ -549,7 +573,7 @@ async function setPreference(userId, newPreference, username) {
     return `Preference added: "${newPreference}"`;
   } catch (error) {
     advancedErrorHandler(error, "setPreference");
-    return "Failed to update preferences, try again.";
+    return "Failed to update preferences, please try again later.";
   }
 }
 
@@ -573,7 +597,7 @@ async function removePreference(userId, indexToRemove) {
     return { success: true, message: `Preference removed: "${removed}"` };
   } catch (error) {
     advancedErrorHandler(error, "removePreference");
-    return { success: false, message: "Failed to remove preference, try again." };
+    return { success: false, message: "Failed to remove preference, please try again later." };
   }
 }
 
@@ -654,7 +678,6 @@ const commands = [
         ]
       },
       { name: "value", type: 3, description: "Optional value for the action", required: false },
-      // Additional options for database action.
       { name: "folder", type: 3, description: "Folder name (for database action)", required: false },
       { name: "server", type: 3, description: "Server ID (for database action)", required: false },
       { name: "channel", type: 3, description: "Channel ID (for database action)", required: false }
@@ -678,19 +701,19 @@ const commands = [
   },
   {
     name: "remember",
-    description: "Store your personal info (name, birthday, gender, dislikes, likes)",
+    description: "Store your personal info (name, birthday, gender, dislikes, likes, about)",
     options: [
       { name: "name", type: 3, description: "Your name", required: false },
       { name: "birthday", type: 3, description: "Your birthday", required: false },
       { name: "gender", type: 3, description: "Your gender", required: false },
       { name: "dislikes", type: 3, description: "Your dislikes", required: false },
-      { name: "likes", type: 3, description: "Your likes", required: false }
+      { name: "likes", type: 3, description: "Your likes", required: false },
+      { name: "about", type: 3, description: "About you", required: false }
     ]
   },
   {
     name: "unremember",
-    description: "Remove your stored personal info (interactive menu)",
-    // No options; the bot will display a select menu based on stored info.
+    description: "Remove your stored personal info (interactive menu)"
   },
   {
     name: "meme",
@@ -744,7 +767,6 @@ client.on("interactionCreate", async (interaction) => {
         return;
       }
       if (commandName === "start") {
-        // Check if already started.
         const settings = await getGuildSettings(interaction.guild.id);
         if (settings.chat_enabled === 1) {
           const alreadyOnReplies = [
@@ -821,30 +843,50 @@ client.on("interactionCreate", async (interaction) => {
             await interaction.reply({ content: "Conversation memory reset.", ephemeral: true });
             break;
           case "getstats": {
-            // Group conversationTracker by guild.
-            const stats = {};
-            for (const [channelId, data] of conversationTracker.entries()) {
-              const channel = client.channels.cache.get(channelId);
-              if (channel && channel.guild) {
-                const guildId = channel.guild.id;
-                if (!stats[guildId]) {
-                  stats[guildId] = { name: channel.guild.name, count: 0 };
-                }
-                stats[guildId].count += data.participants.size;
-              }
-            }
-            let statMsg = "Active conversations by server:\n";
-            for (const guildId in stats) {
-              statMsg += `${stats[guildId].name} (${guildId}): ${stats[guildId].count} active users\n`;
-            }
-            if (statMsg === "Active conversations by server:\n") statMsg = "No active conversations.";
-            await interaction.reply({ content: statMsg, ephemeral: true });
+            const row = new ActionRowBuilder().addComponents(
+              new ButtonBuilder()
+                .setCustomId("getstats_all_1")
+                .setLabel("All Servers")
+                .setStyle(ButtonStyle.Primary),
+              new ButtonBuilder()
+                .setCustomId("getstats_select")
+                .setLabel("Select a Specific Server")
+                .setStyle(ButtonStyle.Primary)
+            );
+            await interaction.reply({ content: "Choose an option for getstats:", components: [row], ephemeral: true });
             break;
           }
           case "listusers": {
-            const users = await dbQuery("SELECT username, user_id FROM user_data");
-            const userList = users.map(r => `${r.username} (${r.user_id})`).join("\n") || "No users found.";
-            await interaction.reply({ content: `Users in DB:\n${userList}`, ephemeral: true });
+            try {
+              const users = await dbQuery("SELECT username, user_id FROM user_data");
+              if (!users || users.length === 0) {
+                await interaction.reply({ content: "No users found.", ephemeral: true });
+                break;
+              }
+              const pageSize = 10;
+              const totalPages = Math.ceil(users.length / pageSize);
+              const page = 1;
+              const start = (page - 1) * pageSize;
+              const pageUsers = users.slice(start, start + pageSize);
+              const userList = pageUsers.map((r, index) => `${start + index + 1}. ${r.username} (${r.user_id})`).join("\n");
+              const content = `**Users (Page ${page} of ${totalPages}):**\n` + userList;
+              const buttons = new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                  .setCustomId(`listusers_prev_${page}`)
+                  .setLabel("Previous")
+                  .setStyle(ButtonStyle.Primary)
+                  .setDisabled(true),
+                new ButtonBuilder()
+                  .setCustomId(`listusers_next_${page}`)
+                  .setLabel("Next")
+                  .setStyle(ButtonStyle.Primary)
+                  .setDisabled(totalPages <= 1)
+              );
+              await interaction.reply({ content, components: [buttons], ephemeral: true });
+            } catch (error) {
+              advancedErrorHandler(error, "List Users");
+              await interaction.reply({ content: "An error occurred while retrieving users.", ephemeral: true });
+            }
             break;
           }
           case "globalchat_on":
@@ -865,12 +907,10 @@ client.on("interactionCreate", async (interaction) => {
             break;
           }
           case "globalprefremove": {
-            // If value is provided, remove it directly.
             if (value) {
               await dbRun("DELETE FROM global_preferences WHERE preference = ?", [value]);
               await interaction.reply({ content: `Global preference removed: "${value}" (if it existed)`, ephemeral: true });
             } else {
-              // Else show interactive select menu.
               const rows = await dbQuery("SELECT id, preference FROM global_preferences");
               if (rows.length === 0) {
                 await interaction.reply({ content: "No global preferences to remove.", ephemeral: true });
@@ -893,10 +933,32 @@ client.on("interactionCreate", async (interaction) => {
             try {
               const logContent = fs.readFileSync("error.log", "utf8");
               const lines = logContent.trim().split("\n");
-              const last20 = lines.slice(-20).join("\n") || "No logs available.";
-              await interaction.reply({ content: `Last 20 log lines:\n${last20}`, ephemeral: true });
+              if (lines.length === 0) {
+                await interaction.reply({ content: "No logs available.", ephemeral: true });
+                break;
+              }
+              const pageSize = 25;
+              const totalPages = Math.ceil(lines.length / pageSize);
+              const page = 1;
+              const start = (page - 1) * pageSize;
+              const pageLines = lines.slice(start, start + pageSize).map((line, index) => `${start + index + 1}. ${line}`);
+              const logMessage = `**Error Logs (Page ${page} of ${totalPages}):**\n` + pageLines.join("\n");
+              const buttons = new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                  .setCustomId(`log_page_prev_${page}`)
+                  .setLabel("Previous")
+                  .setStyle(ButtonStyle.Primary)
+                  .setDisabled(true),
+                new ButtonBuilder()
+                  .setCustomId(`log_page_next_${page}`)
+                  .setLabel("Next")
+                  .setStyle(ButtonStyle.Primary)
+                  .setDisabled(totalPages <= 1)
+              );
+              await interaction.reply({ content: logMessage, components: [buttons], ephemeral: true });
             } catch (err) {
-              await interaction.reply({ content: "Error reading log file.", ephemeral: true });
+              advancedErrorHandler(err, "Debug Log Command");
+              await interaction.reply({ content: "An error occurred while retrieving logs.", ephemeral: true });
             }
             break;
           }
@@ -905,7 +967,6 @@ client.on("interactionCreate", async (interaction) => {
               await interaction.reply({ content: "Please provide an announcement message.", ephemeral: true });
               return;
             }
-            // Send announcement to each guild's last active channel or systemChannel.
             client.guilds.cache.forEach(async (guild) => {
               let targetChannel = lastActiveChannel.get(guild.id);
               if (!targetChannel) targetChannel = guild.systemChannel;
@@ -956,19 +1017,20 @@ Global custom mood: ${globalCustomMood.enabled ? globalCustomMood.mood : "disabl
             break;
           }
           case "database": {
-            const folder = interaction.options.getString("folder");
-            const serverId = interaction.options.getString("server");
-            const channelId = interaction.options.getString("channel");
-            if (folder && folder.toLowerCase() === "chat" && channelId) {
-              const messages = await dbQuery("SELECT * FROM chat_messages WHERE channel_id = ? AND user = ? ORDER BY timestamp DESC LIMIT 20", [channelId, client.user.id]);
-              if (messages.length === 0) {
-                await interaction.reply({ content: "No bot messages found for that channel.", ephemeral: true });
-              } else {
-                const msgList = messages.map(m => `[${m.timestamp}] ${m.content}`).join("\n");
-                await interaction.reply({ content: `Bot messages in channel ${channelId}:\n${msgList}`, ephemeral: true });
-              }
-            } else {
-              await interaction.reply({ content: "Please provide folder='chat' and a valid channel ID.", ephemeral: true });
+            try {
+              const row = new ActionRowBuilder().addComponents(
+                new StringSelectMenuBuilder()
+                  .setCustomId("database_server_select")
+                  .setPlaceholder("Select a server")
+                  .addOptions(Array.from(client.guilds.cache.values()).map(guild => ({
+                    label: guild.name.length > 25 ? guild.name.substring(0,22) + "..." : guild.name,
+                    value: guild.id
+                  })))
+              );
+              await interaction.reply({ content: "Select a server to view its database folders:", components: [row], ephemeral: true });
+            } catch (error) {
+              advancedErrorHandler(error, "Database Command");
+              await interaction.reply({ content: "An error occurred while processing the database command.", ephemeral: true });
             }
             break;
           }
@@ -1017,7 +1079,7 @@ Global custom mood: ${globalCustomMood.enabled ? globalCustomMood.mood : "disabl
           await interaction.reply({ content: "Select a channel to remove:", components: [row], ephemeral: true });
         }
       } else if (commandName === "remember") {
-        const fields = ["name", "birthday", "gender", "dislikes", "likes"];
+        const fields = ["name", "birthday", "gender", "dislikes", "likes", "about"];
         let updates = {};
         fields.forEach(field => {
           const valueField = interaction.options.getString(field);
@@ -1027,24 +1089,37 @@ Global custom mood: ${globalCustomMood.enabled ? globalCustomMood.mood : "disabl
           await interaction.reply({ content: "Please provide at least one field to remember.", ephemeral: true });
           return;
         }
-        const existing = await dbQuery("SELECT * FROM user_remember WHERE user_id = ?", [interaction.user.id]);
-        if (existing.length === 0) {
-          await dbRun("INSERT INTO user_remember (user_id, name, birthday, gender, dislikes, likes) VALUES (?, ?, ?, ?, ?, ?)", [
+        const existingRows = await dbQuery("SELECT * FROM user_remember WHERE user_id = ?", [interaction.user.id]);
+        if (existingRows.length === 0) {
+          await dbRun("INSERT INTO user_remember (user_id, name, birthday, gender, dislikes, likes, about) VALUES (?, ?, ?, ?, ?, ?, ?)", [
             interaction.user.id,
             updates.name || null,
             updates.birthday || null,
             updates.gender || null,
-            updates.dislikes || null,
-            updates.likes || null
+            updates.dislikes ? JSON.stringify([updates.dislikes]) : JSON.stringify([]),
+            updates.likes ? JSON.stringify([updates.likes]) : JSON.stringify([]),
+            updates.about ? JSON.stringify([updates.about]) : JSON.stringify([])
           ]);
         } else {
+          const row = existingRows[0];
           for (const field in updates) {
-            await dbRun(`UPDATE user_remember SET ${field} = ? WHERE user_id = ?`, [updates[field], interaction.user.id]);
+            if (["likes", "dislikes", "about"].includes(field)) {
+              let arr = [];
+              try {
+                arr = JSON.parse(row[field] || "[]");
+                if (!Array.isArray(arr)) arr = [];
+              } catch (e) {
+                arr = [];
+              }
+              arr.push(updates[field]);
+              await dbRun(`UPDATE user_remember SET ${field} = ? WHERE user_id = ?`, [JSON.stringify(arr), interaction.user.id]);
+            } else {
+              await dbRun(`UPDATE user_remember SET ${field} = ? WHERE user_id = ?`, [updates[field], interaction.user.id]);
+            }
           }
         }
         await interaction.reply({ content: "Your personal info has been remembered.", ephemeral: true });
       } else if (commandName === "unremember") {
-        // Interactive menu: show which fields are stored.
         const rowData = await dbQuery("SELECT * FROM user_remember WHERE user_id = ?", [interaction.user.id]);
         if (rowData.length === 0) {
           await interaction.reply({ content: "You have no remembered info.", ephemeral: true });
@@ -1052,7 +1127,7 @@ Global custom mood: ${globalCustomMood.enabled ? globalCustomMood.mood : "disabl
         }
         const data = rowData[0];
         const options = [];
-        for (const field of ["name", "birthday", "gender", "dislikes", "likes"]) {
+        for (const field of ["name", "birthday", "gender", "dislikes", "likes", "about"]) {
           if (data[field]) {
             options.push({ label: `${field}: ${data[field]}`, value: field });
           }
@@ -1118,13 +1193,320 @@ Global custom mood: ${globalCustomMood.enabled ? globalCustomMood.mood : "disabl
         const field = interaction.values[0];
         await dbRun(`UPDATE user_remember SET ${field} = NULL WHERE user_id = ?`, [interaction.user.id]);
         await interaction.update({ content: `Removed your ${field} from remembered info.`, components: [] });
+      } else if (interaction.customId === "database_server_select") {
+        try {
+          const serverId = interaction.values[0];
+          const selectMenu = new StringSelectMenuBuilder()
+            .setCustomId(`database_folder_select_${serverId}`)
+            .setPlaceholder("Select a database folder")
+            .addOptions([
+              { label: "Chat Messages", value: "chat_messages" },
+              { label: "User Data", value: "user_data" },
+              { label: "Mood Data", value: "mood_data" },
+              { label: "Server Settings", value: "server_settings" },
+              { label: "Global Preferences", value: "global_preferences" },
+              { label: "User Remember", value: "user_remember" },
+              { label: "Media Library", value: "media_library" }
+            ]);
+          const row = new ActionRowBuilder().addComponents(selectMenu);
+          await interaction.update({ content: "Select a database folder to view its data:", components: [row] });
+        } catch (error) {
+          advancedErrorHandler(error, "Database Server Selection");
+          await interaction.reply({ content: "An error occurred during server selection.", ephemeral: true });
+        }
+      } else if (interaction.customId.startsWith("database_folder_select_")) {
+        try {
+          const serverId = interaction.customId.split("_").pop();
+          const folder = interaction.values[0];
+          const pageSize = 25;
+          const page = 1;
+          let rows = [];
+          if (folder === "server_settings") {
+            rows = await dbQuery("SELECT * FROM server_settings WHERE guild_id = ?", [serverId]);
+          } else if (folder === "chat_messages") {
+            const guild = client.guilds.cache.get(serverId);
+            const textChannels = guild.channels.cache.filter(ch => ch.type === ChannelType.GuildText);
+            const channelIds = Array.from(textChannels.keys());
+            if (channelIds.length > 0) {
+              const placeholders = channelIds.map(() => "?").join(",");
+              rows = await dbQuery(`SELECT * FROM chat_messages WHERE channel_id IN (${placeholders}) ORDER BY timestamp DESC`, channelIds);
+            }
+          } else {
+            rows = await dbQuery(`SELECT * FROM ${folder}`);
+          }
+          if (!rows || rows.length === 0) {
+            await interaction.update({ content: "No data found in the selected folder.", components: [] });
+            return;
+          }
+          const totalPages = Math.ceil(rows.length / pageSize);
+          const start = (page - 1) * pageSize;
+          const pageRows = rows.slice(start, start + pageSize);
+          let content = `**Data from ${folder} (Page ${page} of ${totalPages}):**\n`;
+          pageRows.forEach((row, index) => {
+            content += `${start + index + 1}. ${JSON.stringify(row)}\n`;
+          });
+          const buttons = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId(`database_prev_${folder}_${serverId}_${page}`)
+              .setLabel("Previous")
+              .setStyle(ButtonStyle.Primary)
+              .setDisabled(true),
+            new ButtonBuilder()
+              .setCustomId(`database_next_${folder}_${serverId}_${page}`)
+              .setLabel("Next")
+              .setStyle(ButtonStyle.Primary)
+              .setDisabled(totalPages <= 1)
+          );
+          await interaction.update({ content, components: [buttons] });
+        } catch (error) {
+          advancedErrorHandler(error, "Database Folder Selection");
+          await interaction.reply({ content: "An error occurred while retrieving folder data.", ephemeral: true });
+        }
+      }
+    } else if (interaction.isButton()) {
+      const customId = interaction.customId;
+      if (customId.startsWith("log_page_prev_") || customId.startsWith("log_page_next_")) {
+        try {
+          const parts = customId.split("_");
+          const direction = parts[2]; // "prev" or "next"
+          let currentPage = parseInt(parts[3], 10);
+          const logContent = fs.readFileSync("error.log", "utf8");
+          const lines = logContent.trim().split("\n");
+          const pageSize = 25;
+          const totalPages = Math.ceil(lines.length / pageSize);
+          if (direction === "next") {
+            currentPage = Math.min(currentPage + 1, totalPages);
+          } else if (direction === "prev") {
+            currentPage = Math.max(currentPage - 1, 1);
+          }
+          const start = (currentPage - 1) * pageSize;
+          const pageLines = lines.slice(start, start + pageSize).map((line, index) => `${start + index + 1}. ${line}`);
+          const logMessage = `**Error Logs (Page ${currentPage} of ${totalPages}):**\n` + pageLines.join("\n");
+          const buttons = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId(`log_page_prev_${currentPage}`)
+              .setLabel("Previous")
+              .setStyle(ButtonStyle.Primary)
+              .setDisabled(currentPage === 1),
+            new ButtonBuilder()
+              .setCustomId(`log_page_next_${currentPage}`)
+              .setLabel("Next")
+              .setStyle(ButtonStyle.Primary)
+              .setDisabled(currentPage === totalPages)
+          );
+          await interaction.update({ content: logMessage, components: [buttons] });
+        } catch (error) {
+          advancedErrorHandler(error, "Log Pagination Button");
+          await interaction.reply({ content: "An error occurred while updating logs.", ephemeral: true });
+        }
+      } else if (customId.startsWith("listusers_prev_") || customId.startsWith("listusers_next_")) {
+        try {
+          const parts = customId.split("_");
+          const direction = parts[1]; // "prev" or "next"
+          let currentPage = parseInt(parts[2], 10);
+          const users = await dbQuery("SELECT username, user_id FROM user_data");
+          const pageSize = 10;
+          const totalPages = Math.ceil(users.length / pageSize);
+          if (customId.startsWith("listusers_next_")) {
+            currentPage = Math.min(currentPage + 1, totalPages);
+          } else {
+            currentPage = Math.max(currentPage - 1, 1);
+          }
+          const start = (currentPage - 1) * pageSize;
+          const pageUsers = users.slice(start, start + pageSize);
+          const userList = pageUsers.map((r, index) => `${start + index + 1}. ${r.username} (${r.user_id})`).join("\n");
+          const content = `**Users (Page ${currentPage} of ${totalPages}):**\n` + userList;
+          const buttons = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId(`listusers_prev_${currentPage}`)
+              .setLabel("Previous")
+              .setStyle(ButtonStyle.Primary)
+              .setDisabled(currentPage === 1),
+            new ButtonBuilder()
+              .setCustomId(`listusers_next_${currentPage}`)
+              .setLabel("Next")
+              .setStyle(ButtonStyle.Primary)
+              .setDisabled(currentPage === totalPages)
+          );
+          await interaction.update({ content, components: [buttons] });
+        } catch (error) {
+          advancedErrorHandler(error, "List Users Pagination");
+          await interaction.reply({ content: "An error occurred while updating users list.", ephemeral: true });
+        }
+      } else if (customId.startsWith("getstats_all_")) {
+        try {
+          const parts = customId.split("_");
+          let currentPage = parseInt(parts[2], 10);
+          const guilds = Array.from(client.guilds.cache.values());
+          const pageSize = 5;
+          const totalPages = Math.ceil(guilds.length / pageSize);
+          const start = (currentPage - 1) * pageSize;
+          const pageGuilds = guilds.slice(start, start + pageSize);
+          let content = `**Servers (Page ${currentPage} of ${totalPages}):**\n`;
+          pageGuilds.forEach((guild, index) => {
+            content += `${start + index + 1}. ${guild.name} (${guild.id})\n`;
+          });
+          const buttons = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId(`getstats_all_prev_${currentPage}`)
+              .setLabel("Previous")
+              .setStyle(ButtonStyle.Primary)
+              .setDisabled(currentPage === 1),
+            new ButtonBuilder()
+              .setCustomId(`getstats_all_next_${currentPage}`)
+              .setLabel("Next")
+              .setStyle(ButtonStyle.Primary)
+              .setDisabled(currentPage === totalPages)
+          );
+          await interaction.update({ content, components: [buttons] });
+        } catch (error) {
+          advancedErrorHandler(error, "GetStats All Servers Pagination");
+          await interaction.reply({ content: "An error occurred while updating servers list.", ephemeral: true });
+        }
+      } else if (customId.startsWith("getstats_all_prev_") || customId.startsWith("getstats_all_next_")) {
+        try {
+          const parts = customId.split("_");
+          let currentPage = parseInt(parts[3], 10);
+          const direction = parts[2];
+          const guilds = Array.from(client.guilds.cache.values());
+          const pageSize = 5;
+          const totalPages = Math.ceil(guilds.length / pageSize);
+          if (direction === "prev") {
+            currentPage = Math.max(currentPage - 1, 1);
+          } else if (direction === "next") {
+            currentPage = Math.min(currentPage + 1, totalPages);
+          }
+          const start = (currentPage - 1) * pageSize;
+          const pageGuilds = guilds.slice(start, start + pageSize);
+          let content = `**Servers (Page ${currentPage} of ${totalPages}):**\n`;
+          pageGuilds.forEach((guild, index) => {
+            content += `${start + index + 1}. ${guild.name} (${guild.id})\n`;
+          });
+          const buttons = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId(`getstats_all_prev_${currentPage}`)
+              .setLabel("Previous")
+              .setStyle(ButtonStyle.Primary)
+              .setDisabled(currentPage === 1),
+            new ButtonBuilder()
+              .setCustomId(`getstats_all_next_${currentPage}`)
+              .setLabel("Next")
+              .setStyle(ButtonStyle.Primary)
+              .setDisabled(currentPage === totalPages)
+          );
+          await interaction.update({ content, components: [buttons] });
+        } catch (error) {
+          advancedErrorHandler(error, "GetStats All Servers Pagination");
+          await interaction.reply({ content: "An error occurred while updating servers list.", ephemeral: true });
+        }
+      } else if (customId === "getstats_select") {
+        try {
+          const selectMenu = new StringSelectMenuBuilder()
+            .setCustomId("getstats_select_menu")
+            .setPlaceholder("Select a server")
+            .addOptions(Array.from(client.guilds.cache.values()).map(guild => ({
+              label: guild.name.length > 25 ? guild.name.substring(0,22) + "..." : guild.name,
+              value: guild.id
+            })));
+          const row = new ActionRowBuilder().addComponents(selectMenu);
+          await interaction.update({ content: "Select a server to view its stats:", components: [row] });
+        } catch (error) {
+          advancedErrorHandler(error, "GetStats Select Server");
+          await interaction.reply({ content: "An error occurred while preparing server selection.", ephemeral: true });
+        }
+      } else if (interaction.isStringSelectMenu() && interaction.customId === "getstats_select_menu") {
+        try {
+          const serverId = interaction.values[0];
+          const guild = client.guilds.cache.get(serverId);
+          if (!guild) {
+            await interaction.update({ content: "Server not found.", components: [] });
+            return;
+          }
+          const profilePic = guild.iconURL() || "No profile picture.";
+          const totalMembers = guild.memberCount || "N/A";
+          let activeUsers = 0;
+          conversationTracker.forEach((data, channelId) => {
+            const channel = client.channels.cache.get(channelId);
+            if (channel && channel.guild && channel.guild.id === guild.id) {
+              activeUsers += data.participants.size;
+            }
+          });
+          const textChannels = guild.channels.cache.filter(ch => ch.type === ChannelType.GuildText);
+          const channelIds = Array.from(textChannels.keys());
+          let totalInteracted = "N/A";
+          if (channelIds.length > 0) {
+            const placeholders = channelIds.map(() => "?").join(",");
+            const rows = await dbQuery(`SELECT COUNT(DISTINCT user) as count FROM chat_messages WHERE channel_id IN (${placeholders})`, channelIds);
+            totalInteracted = rows[0]?.count || 0;
+          }
+          const statsMessage = `**Server Stats for ${guild.name}:**
+Profile Picture: ${profilePic}
+Total Members: ${totalMembers}
+Active Users Talking Now: ${activeUsers}
+Total Unique Users (All Time): ${totalInteracted}`;
+          await interaction.update({ content: statsMessage, components: [] });
+        } catch (error) {
+          advancedErrorHandler(error, "GetStats Server Details");
+          await interaction.reply({ content: "An error occurred while retrieving server stats.", ephemeral: true });
+        }
+      } else if (customId.startsWith("database_prev_") || customId.startsWith("database_next_")) {
+        try {
+          const parts = customId.split("_"); // Format: database_{prev|next}_{folder}_{serverId}_{page}
+          const actionType = parts[1];
+          const folder = parts[2];
+          const serverId = parts[3];
+          let currentPage = parseInt(parts[4], 10);
+          const pageSize = 25;
+          let rows = [];
+          if (folder === "server_settings") {
+            rows = await dbQuery("SELECT * FROM server_settings WHERE guild_id = ?", [serverId]);
+          } else if (folder === "chat_messages") {
+            const guild = client.guilds.cache.get(serverId);
+            const textChannels = guild.channels.cache.filter(ch => ch.type === ChannelType.GuildText);
+            const channelIds = Array.from(textChannels.keys());
+            if (channelIds.length > 0) {
+              const placeholders = channelIds.map(() => "?").join(",");
+              rows = await dbQuery(`SELECT * FROM chat_messages WHERE channel_id IN (${placeholders}) ORDER BY timestamp DESC`, channelIds);
+            }
+          } else {
+            rows = await dbQuery(`SELECT * FROM ${folder}`);
+          }
+          const totalPages = Math.ceil(rows.length / pageSize);
+          if (actionType === "prev") {
+            currentPage = Math.max(currentPage - 1, 1);
+          } else if (actionType === "next") {
+            currentPage = Math.min(currentPage + 1, totalPages);
+          }
+          const start = (currentPage - 1) * pageSize;
+          const pageRows = rows.slice(start, start + pageSize);
+          let content = `**Data from ${folder} (Page ${currentPage} of ${totalPages}):**\n`;
+          pageRows.forEach((row, index) => {
+            content += `${start + index + 1}. ${JSON.stringify(row)}\n`;
+          });
+          const buttons = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId(`database_prev_${folder}_${serverId}_${currentPage}`)
+              .setLabel("Previous")
+              .setStyle(ButtonStyle.Primary)
+              .setDisabled(currentPage === 1),
+            new ButtonBuilder()
+              .setCustomId(`database_next_${folder}_${serverId}_${currentPage}`)
+              .setLabel("Next")
+              .setStyle(ButtonStyle.Primary)
+              .setDisabled(currentPage === totalPages)
+          );
+          await interaction.update({ content, components: [buttons] });
+        } catch (error) {
+          advancedErrorHandler(error, "Database Pagination");
+          await interaction.reply({ content: "An error occurred while updating folder data.", ephemeral: true });
+        }
       }
     }
   } catch (error) {
     advancedErrorHandler(error, "Interaction Handler");
     try {
       if (!interaction.replied) {
-        await interaction.reply({ content: "an error occurred, try again later.", ephemeral: true });
+        await interaction.reply({ content: "An error occurred while processing your request. Please try again later.", ephemeral: true });
       }
     } catch (err) {
       advancedErrorHandler(err, "Interaction Error Reply");
@@ -1137,13 +1519,10 @@ Global custom mood: ${globalCustomMood.enabled ? globalCustomMood.mood : "disabl
  ********************************************************************/
 client.on("messageCreate", async (message) => {
   try {
-    // Update last active channel per guild.
     if (message.guild && message.channel.type === ChannelType.GuildText) {
       lastActiveChannel.set(message.guild.id, message.channel);
     }
-    // If global chat is off, do not process non-debug messages.
     if (!globalChatEnabled) return;
-    // Insert message with channel_id.
     await dbRun("INSERT INTO chat_messages (discord_id, channel_id, user, content) VALUES (?, ?, ?, ?)", [message.id, message.channel.id, message.author.id, message.content]);
     if (message.author.id === client.user.id) return;
     if (message.guild) {
@@ -1151,7 +1530,6 @@ client.on("messageCreate", async (message) => {
       if (settings.chat_enabled !== 1) return;
       if (settings.allowed_channels.length > 0 && !settings.allowed_channels.includes(message.channel.id)) return;
     }
-    // Trigger meme/gif sending if keywords present (30% chance)
     const triggers = ["meme", "funny", "gif"];
     if (triggers.some(t => message.content.toLowerCase().includes(t)) && Math.random() < 0.30) {
       const searchTerm = lastBotMessageContent ? lastBotMessageContent.split(" ").slice(0, 3).join(" ") : "funny";
