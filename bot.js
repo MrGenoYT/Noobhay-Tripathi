@@ -104,6 +104,34 @@ db.serialize(() => {
       allowed_channels TEXT DEFAULT '[]'
     );
   `);
+  // NEW TABLE: Global preferences for all users and servers.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS global_preferences (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      preference TEXT
+    );
+  `);
+  // NEW TABLE: User remember data for personal info.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS user_remember (
+      user_id TEXT PRIMARY KEY,
+      name TEXT,
+      birthday TEXT,
+      gender TEXT,
+      dislikes TEXT,
+      likes TEXT
+    );
+  `);
+  // NEW TABLE: Media library to store memes and gifs info.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS media_library (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      type TEXT,
+      url TEXT,
+      name TEXT,
+      timestamp TEXT DEFAULT (datetime('now', 'localtime'))
+    );
+  `);
 });
 
 /********************************************************************
@@ -347,20 +375,20 @@ async function getRandomMeme(searchKeyword = "funny") {
     const response = await fetch(url, { headers: { "User-Agent": "red-bot/1.0" } });
     if (!response.ok) {
       console.error(`Reddit API error: ${response.status} ${response.statusText}`);
-      return "couldn't fetch a meme, sorry.";
+      return { url: "couldn't fetch a meme, sorry.", name: "unknown meme" };
     }
     const data = await response.json();
     if (!data.data || !data.data.children || data.data.children.length === 0) {
       console.error("No meme results found.");
-      return "couldn't find a meme, sorry.";
+      return { url: "couldn't find a meme, sorry.", name: "unknown meme" };
     }
     const posts = data.data.children.filter(child => child.data && child.data.url && !child.data.over_18);
-    if (!posts.length) return "couldn't find a meme, sorry.";
+    if (!posts.length) return { url: "couldn't find a meme, sorry.", name: "unknown meme" };
     const memePost = getRandomElement(posts).data;
-    return memePost.url;
+    return { url: memePost.url, name: memePost.title || "meme" };
   } catch (error) {
     advancedErrorHandler(error, "getRandomMeme");
-    return "couldn't fetch a meme, sorry.";
+    return { url: "couldn't fetch a meme, sorry.", name: "unknown meme" };
   }
 }
 
@@ -370,17 +398,18 @@ async function getRandomGif(searchKeyword = "funny") {
     const response = await fetch(url);
     if (!response.ok) {
       console.error(`Tenor API error: ${response.status} ${response.statusText}`);
-      return "couldn't fetch a gif, sorry.";
+      return { url: "couldn't fetch a gif, sorry.", name: "unknown gif" };
     }
     const data = await response.json();
     if (!data.results || data.results.length === 0) {
       console.error("No gif results found.");
-      return "couldn't find a gif, sorry.";
+      return { url: "couldn't find a gif, sorry.", name: "unknown gif" };
     }
-    return data.results[0].media_formats.gif.url;
+    const gifUrl = data.results[0].media_formats.gif.url;
+    return { url: gifUrl, name: data.results[0].title || "gif" };
   } catch (error) {
     advancedErrorHandler(error, "getRandomGif");
-    return "couldn't fetch a gif, sorry.";
+    return { url: "couldn't fetch a gif, sorry.", name: "unknown gif" };
   }
 }
 
@@ -399,6 +428,15 @@ async function performWebSearch(query) {
   } catch (error) {
     console.error("Web search error:", error);
     return "Web search error.";
+  }
+}
+
+// NEW FUNCTION: Store media (meme/gif) details in the database.
+async function storeMedia(type, url, name) {
+  try {
+    await dbRun("INSERT INTO media_library (type, url, name) VALUES (?, ?, ?)", [type, url, name]);
+  } catch (error) {
+    advancedErrorHandler(error, "storeMedia");
   }
 }
 
@@ -447,12 +485,25 @@ function shouldReply(message) {
 }
 
 /********************************************************************
- * SECTION 10: GEMINI CHAT FUNCTION (WITH MOOD, PREFERENCES & WEB SEARCH)
+ * SECTION 10: GEMINI CHAT FUNCTION (WITH MOOD, PREFERENCES, WEB SEARCH 
+ *              & OLD CONVERSATION CONTEXT)
  ********************************************************************/
 async function chatWithGemini(userId, userMessage) {
   try {
     const rows = await dbQuery("SELECT content FROM chat_messages ORDER BY timestamp DESC LIMIT 100");
     const recentChat = rows.reverse().map(r => r.content).join("\n");
+
+    // Fetch old conversation context using keywords from current message
+    const words = userMessage.split(/\s+/).filter(word => word.length > 3);
+    let oldContext = "";
+    if (words.length > 0) {
+      const placeholders = words.map(() => "content LIKE ?").join(" OR ");
+      const params = words.map(word => `%${word}%`);
+      const extraRows = await dbQuery("SELECT content FROM chat_messages WHERE " + placeholders + " ORDER BY timestamp DESC LIMIT 5", params);
+      if (extraRows.length > 0) {
+        oldContext = "\nOld conversation context:\n" + extraRows.reverse().map(r => r.content).join("\n");
+      }
+    }
 
     const userRows = await dbQuery("SELECT preferences, username, behavior FROM user_data WHERE user_id = ?", [userId]);
     const userPreferences = userRows[0]?.preferences || "[]";
@@ -477,6 +528,7 @@ Mood Instructions for "${userMood}":
 ${moodExtra}
 Recent conversation:
 ${recentChat}
+${oldContext}
 User (${username}): ${userMessage}
 Current mood: ${userMood}
 User tone: ${tone}
@@ -486,8 +538,8 @@ Reply (be modern, witty, and brutally offensive if appropriate; keep reply under
 
     const result = await model.generateContent(prompt);
     let reply = (result.response && result.response.text()) || "i'm having a moment, try again.";
-    const words = reply.trim().split(/\s+/);
-    if (words.length > 40) reply = words.slice(0, 40).join(" ");
+    const wordsArr = reply.trim().split(/\s+/);
+    if (wordsArr.length > 40) reply = wordsArr.slice(0, 40).join(" ");
 
     await dbRun(
       "INSERT OR IGNORE INTO user_data (user_id, username, behavior, preferences) VALUES (?, ?, '{\"interactions\":0}', '[]')",
@@ -519,7 +571,7 @@ async function setMood(userId, mood) {
   } catch (error) {
     advancedErrorHandler(error, "setMood");
     return "Failed to update mood, try again.";
-  }
+             }
 }
 
 async function setPreference(userId, newPreference, username) {
@@ -637,12 +689,19 @@ const commands = [
           { name: "getstats", value: "getstats" },
           { name: "listusers", value: "listusers" },
           { name: "globalchat_on", value: "globalchat_on" },
-          { name: "globalchat_off", value: "globalchat_off" }
+          { name: "globalchat_off", value: "globalchat_off" },
+          { name: "globalprefadd", value: "globalprefadd" },
+          { name: "globalprefremove", value: "globalprefremove" }
         ]
+      },
+      {
+        type: 3,
+        name: "value",
+        description: "Preference value for globalprefadd or globalprefremove",
+        required: false
       }
     ]
   },
-  // NEW COMMAND: "set" with subcommands for channel configuration (server-specific)
   {
     name: "set",
     description: "Server configuration commands (requires Manage Server/Administrator)",
@@ -657,6 +716,28 @@ const commands = [
         name: "remove",
         description: "Remove a channel from the bot's allowed channels"
       }
+    ]
+  },
+  {
+    name: "remember",
+    description: "Store your personal info (name, birthday, gender, dislikes, likes)",
+    options: [
+      { name: "name", type: 3, description: "Your name", required: false },
+      { name: "birthday", type: 3, description: "Your birthday", required: false },
+      { name: "gender", type: 3, description: "Your gender", required: false },
+      { name: "dislikes", type: 3, description: "Your dislikes", required: false },
+      { name: "likes", type: 3, description: "Your likes", required: false }
+    ]
+  },
+  {
+    name: "unremember",
+    description: "Remove your stored personal info (name, birthday, gender, dislikes, likes)",
+    options: [
+      { name: "name", type: 3, description: "Remove your name", required: false },
+      { name: "birthday", type: 3, description: "Remove your birthday", required: false },
+      { name: "gender", type: 3, description: "Remove your gender", required: false },
+      { name: "dislikes", type: 3, description: "Remove your dislikes", required: false },
+      { name: "likes", type: 3, description: "Remove your likes", required: false }
     ]
   }
 ];
@@ -699,7 +780,7 @@ client.on("interactionCreate", async (interaction) => {
         ]), ephemeral: true });
       } else if (commandName === "stop") {
         await setGuildChat(interaction.guild.id, false);
-        await interaction.reply({ content: "Bot chat disabled in this server. Only /start and /debug commands are available now.", ephemeral: true });
+        await interaction.reply({ content: "cya i'll go then 😔", ephemeral: true });
       } else if (commandName === "setmood") {
         const mood = interaction.options.getString("mood").toLowerCase();
         const response = await setMood(interaction.user.id, mood);
@@ -771,6 +852,26 @@ client.on("interactionCreate", async (interaction) => {
             globalChatEnabled = false;
             await interaction.reply({ content: "Global chat is now OFF for all servers. Only debug commands are allowed.", ephemeral: true });
             break;
+          case "globalprefadd": {
+            const pref = interaction.options.getString("value");
+            if (!pref) {
+              await interaction.reply({ content: "Please provide a preference value to add.", ephemeral: true });
+              return;
+            }
+            await dbRun("INSERT INTO global_preferences (preference) VALUES (?)", [pref]);
+            await interaction.reply({ content: `Global preference added: "${pref}"`, ephemeral: true });
+            break;
+          }
+          case "globalprefremove": {
+            const pref = interaction.options.getString("value");
+            if (!pref) {
+              await interaction.reply({ content: "Please provide a preference value to remove.", ephemeral: true });
+              return;
+            }
+            await dbRun("DELETE FROM global_preferences WHERE preference = ?", [pref]);
+            await interaction.reply({ content: `Global preference removed: "${pref}" (if it existed)`, ephemeral: true });
+            break;
+          }
           default:
             await interaction.reply({ content: "Unknown debug command.", ephemeral: true });
             break;
@@ -818,6 +919,51 @@ client.on("interactionCreate", async (interaction) => {
             .addOptions(options);
           const row = new ActionRowBuilder().addComponents(selectMenu);
           await interaction.reply({ content: "Select a channel to remove:", components: [row], ephemeral: true });
+        }
+      } else if (commandName === "remember") {
+        const fields = ["name", "birthday", "gender", "dislikes", "likes"];
+        let updates = {};
+        fields.forEach(field => {
+          const value = interaction.options.getString(field);
+          if (value) updates[field] = value;
+        });
+        if (Object.keys(updates).length === 0) {
+          await interaction.reply({ content: "Please provide at least one field to remember.", ephemeral: true });
+          return;
+        }
+        const existing = await dbQuery("SELECT * FROM user_remember WHERE user_id = ?", [interaction.user.id]);
+        if (existing.length === 0) {
+          await dbRun("INSERT INTO user_remember (user_id, name, birthday, gender, dislikes, likes) VALUES (?, ?, ?, ?, ?, ?)", [
+            interaction.user.id,
+            updates.name || null,
+            updates.birthday || null,
+            updates.gender || null,
+            updates.dislikes || null,
+            updates.likes || null
+          ]);
+        } else {
+          for (const field in updates) {
+            await dbRun(`UPDATE user_remember SET ${field} = ? WHERE user_id = ?`, [updates[field], interaction.user.id]);
+          }
+        }
+        await interaction.reply({ content: "Your personal info has been remembered.", ephemeral: true });
+      } else if (commandName === "unremember") {
+        const fields = ["name", "birthday", "gender", "dislikes", "likes"];
+        let updates = {};
+        fields.forEach(field => {
+          const value = interaction.options.getString(field);
+          if (value !== null) {
+            updates[field] = null;
+          }
+        });
+        if (Object.keys(updates).length === 0) {
+          await dbRun("DELETE FROM user_remember WHERE user_id = ?", [interaction.user.id]);
+          await interaction.reply({ content: "All your personal info has been removed.", ephemeral: true });
+        } else {
+          for (const field in updates) {
+            await dbRun(`UPDATE user_remember SET ${field} = NULL WHERE user_id = ?`, [interaction.user.id]);
+          }
+          await interaction.reply({ content: "Specified personal info has been removed.", ephemeral: true });
         }
       }
     } else if (interaction.isStringSelectMenu()) {
@@ -879,6 +1025,26 @@ client.on("messageCreate", async (message) => {
     // If global chat is disabled, do not process messages.
     if (!globalChatEnabled) return;
 
+    // Check if message asks about the content of a gif or meme.
+    if (/what(?:'s| is) in the gif/i.test(message.content)) {
+      const rows = await dbQuery("SELECT name FROM media_library WHERE type = ? ORDER BY id DESC LIMIT 1", ["gif"]);
+      if (rows.length > 0) {
+        await message.channel.send(`The gif shows: ${rows[0].name}`);
+      } else {
+        await message.channel.send("I don't have info on the last gif.");
+      }
+      return;
+    }
+    if (/what(?:'s| is) in the meme/i.test(message.content)) {
+      const rows = await dbQuery("SELECT name FROM media_library WHERE type = ? ORDER BY id DESC LIMIT 1", ["meme"]);
+      if (rows.length > 0) {
+        await message.channel.send(`The meme is titled: ${rows[0].name}`);
+      } else {
+        await message.channel.send("I don't have info on the last meme.");
+      }
+      return;
+    }
+
     // Save every message (including memes/gifs) with its discord_id
     await dbRun("INSERT INTO chat_messages (discord_id, user, content) VALUES (?, ?, ?)", [message.id, message.author.id, message.content]);
     
@@ -898,16 +1064,18 @@ client.on("messageCreate", async (message) => {
     if (triggers.some(t => message.content.toLowerCase().includes(t)) && Math.random() < 0.30) {
       const searchTerm = lastBotMessageContent ? lastBotMessageContent.split(" ").slice(0, 3).join(" ") : "funny";
       if (Math.random() < 0.5) {
-        const meme = await getRandomMeme(searchTerm);
+        const memeObj = await getRandomMeme(searchTerm);
         try {
-          await message.channel.send({ content: meme });
+          await message.channel.send({ content: memeObj.url });
+          await storeMedia("meme", memeObj.url, memeObj.name);
         } catch (err) {
           advancedErrorHandler(err, "Sending Meme");
         }
       } else {
-        const gif = await getRandomGif(searchTerm);
+        const gifObj = await getRandomGif(searchTerm);
         try {
-          await message.channel.send({ content: gif });
+          await message.channel.send({ content: gifObj.url });
+          await storeMedia("gif", gifObj.url, gifObj.name);
         } catch (err) {
           advancedErrorHandler(err, "Sending Gif");
         }
