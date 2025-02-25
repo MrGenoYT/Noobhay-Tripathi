@@ -341,23 +341,27 @@ async function getRandomMeme(searchKeyword = "funny") {
 
 async function getRandomMemeFromIFunny(searchKeyword = "funny") {
   try {
-    // Simulated endpoint for iFunny fallback
-    const url = `https://api.ifunny.co/memes/search?query=${encodeURIComponent(searchKeyword)}&limit=50`;
-    const response = await fetch(url, { headers: { "User-Agent": "red-bot/1.0" } });
-    if (!response.ok) {
-      console.error(`iFunny API error: ${response.status} ${response.statusText}`);
-      return { url: "couldn't fetch a meme from iFunny, sorry.", name: "unknown meme" };
-    }
+    const searchQuery = `site:ifunny.co ${encodeURIComponent(searchKeyword)}`;
+    const searchURL = `https://www.google.com/search?q=${searchQuery}&tbm=isch`;
+    const proxyURL = `https://api.allorigins.win/get?url=${encodeURIComponent(searchURL)}`;
+
+    const response = await fetch(proxyURL);
+    if (!response.ok) throw new Error("Failed to fetch iFunny search results.");
+
     const data = await response.json();
-    if (!data.results || data.results.length === 0) {
-      console.error("No meme results found on iFunny.");
-      return { url: "couldn't find a meme on iFunny, sorry.", name: "unknown meme" };
-    }
-    const memePost = getRandomElement(data.results);
-    return { url: memePost.imageUrl || "no image", name: memePost.title || "meme" };
+    const html = data.contents;
+
+    // Extract first image result from search (basic parsing)
+    const match = html.match(/<img[^>]+src="([^"]+)"/);
+    const imageUrl = match ? match[1] : null;
+
+    if (!imageUrl) throw new Error("No memes found on iFunny.");
+
+    return { url: imageUrl, name: "iFunny Meme" };
+
   } catch (error) {
-    advancedErrorHandler(error, "getRandomMemeFromIFunny");
-    return { url: "couldn't fetch a meme from iFunny, sorry.", name: "unknown meme" };
+    console.error("Error fetching meme from iFunny:", error);
+    return { url: "https://ifunny.co/", name: "Couldn't fetch a meme, visit iFunny instead." };
   }
 }
 
