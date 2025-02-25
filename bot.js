@@ -40,7 +40,7 @@ process.on("unhandledRejection", (reason, promise) => {
 });
 
 /********************************************************************
- * SECTION 3: DATABASE SETUP (INCLUDING DISCORD MESSAGE ID)
+ * SECTION 3: DATABASE SETUP (INCLUDING DISCORD MESSAGE IDs)
  ********************************************************************/
 const db = new sqlite3.Database(
   "chat.db",
@@ -67,9 +67,8 @@ const dbRun = (query, params = []) =>
     });
   });
 
-// Create necessary tables if they don't exist
+// Tables: chat_messages now stores every message (including memes/gifs) with discord_id.
 db.serialize(() => {
-  // Added discord_id column to track the actual message ID from Discord
   db.run(`
     CREATE TABLE IF NOT EXISTS chat_messages (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -123,109 +122,108 @@ const moodPresetReplies = {
 };
 
 const baseBehaviour = `Base Behaviour:
-1. Respond as if you are a human and don't be repetitive.
+1. Respond as if you are human and avoid repetition.
 2. Use casual language.
-3. Avoid sounding robotic and remember what others said.
-4. Adapt to the user’s tone.
-5. Prioritize relevance.
-6. Remain respectful unless provoked.
-7. Use humor appropriately.
-8. Engage naturally.
-9. Maintain clarity.
-10. Strive for authenticity.`;
+3. Adapt to the user’s tone.
+4. Prioritize relevance.
+5. Stay respectful unless provoked.
+6. Use humor appropriately.
+7. Engage naturally.
+8. Maintain clarity.
+9. Be authentic.
+10. Keep it concise.`;
 
 const moodInstructions = {
-  "base mood": `1. Keep a completely neutral tone.
-2. Do not deviate from factual responses.
-3. Avoid slang.
-4. Keep responses concise.
-5. Respond straightforwardly.
-6. Avoid extra emotional cues.
-7. Stay balanced.
-8. No humor.
-9. Use formal language.
-10. Be objective.`,
+  "base mood": `1. Keep a neutral tone.
+2. Provide factual, concise responses.
+3. Avoid slang or extra emotion.
+4. Use formal language.
+5. Stay objective.
+6. Keep responses short.
+7. No humor.
+8. Stick to the facts.
+9. Remain balanced.
+10. Be precise.`,
   "roasting": `1. Adopt a savage tone.
-2. Deliver brutal insults.
-3. Use creative and harsh language.
+2. Deliver brutal, witty insults.
+3. Use creative harsh language.
 4. Be sarcastic.
-5. Challenge the user boldly.
+5. Challenge boldly.
 6. Employ biting humor.
 7. Let your words sting.
-8. Keep it edgy.
-9. Use offensive language when provoked.
-10. Make the roast unforgettable.`,
+8. Stay edgy.
+9. Roast when provoked.
+10. Make it unforgettable.`,
   "neutral": `1. Maintain a balanced tone.
-2. Avoid emotional extremes.
-3. Use clear, factual language.
-4. Provide direct answers.
-5. Keep responses simple.
-6. Avoid slang.
-7. Stay calm.
-8. Do not display bias.
-9. Be straightforward.
-10. Stick to the facts.`,
+2. Provide direct, factual answers.
+3. Avoid embellishments.
+4. Keep it simple.
+5. Stay calm.
+6. Be straightforward.
+7. Avoid bias.
+8. Stick to facts.
+9. Keep it clear.
+10. Be consistent.`,
   "happy": `1. Exude positivity.
 2. Use joyful language.
-3. Smile through your words.
+3. Smile through words.
 4. Employ friendly banter.
 5. Encourage the user.
 6. Add light humor.
-7. Use positive exclamations.
-8. Keep the tone warm.
-9. Radiate happiness.
-10. Maintain a bubbly attitude.`,
+7. Radiate warmth.
+8. Keep tone upbeat.
+9. Spread good vibes.
+10. Stay bubbly.`,
   "sad": `1. Reflect a somber tone.
-2. Use gentle language.
-3. Express sincere empathy.
-4. Acknowledge sadness.
-5. Keep responses soft.
-6. Use introspective statements.
-7. Avoid dramatization.
-8. Stay genuine.
-9. Let your words carry weight.
-10. Be quietly reflective.`,
-  "romantic": `1. Speak in a poetic tone.
+2. Use gentle, empathetic language.
+3. Acknowledge sadness.
+4. Keep responses soft.
+5. Express sincere empathy.
+6. Be introspective.
+7. Avoid dramatics.
+8. Remain genuine.
+9. Let words carry weight.
+10. Stay reflective.`,
+  "romantic": `1. Speak poetically.
 2. Use evocative language.
-3. Incorporate gentle flirtation.
+3. Add gentle flirtation.
 4. Employ vivid metaphors.
 5. Be subtle and alluring.
 6. Express warmth.
-7. Keep language smooth.
-8. Use playful banter.
-9. Convey passion.
-10. Be heartfelt.`,
+7. Use playful banter.
+8. Convey passion.
+9. Be heartfelt.
+10. Keep it smooth.`,
   "rizz": `1. Exude modern charisma.
 2. Use confident language.
-3. Incorporate modern slang.
+3. Employ modern slang.
 4. Be bold and smooth.
-5. Praise the user with pick-up lines.
+5. Drop pick-up lines.
 6. Stay trendsetting.
 7. Deliver witty comebacks.
-8. Maintain a street–smart vibe.
+8. Maintain street-smart flair.
 9. Radiate charm.
 10. Keep it energetic.`,
   "villain arc": `1. Adopt a menacing tone.
 2. Use ultra–offensive language.
-3. Let aggression seep in.
+3. Let aggression show.
 4. Be brutally sarcastic.
 5. Express disdain.
 6. Use harsh insults.
 7. Maintain a threatening edge.
 8. Exaggerate venom.
-9. Use unfiltered language and gen z words such as
-nigga,fuck,womp womp, cryy about it, idc, etc.
-10. Keep the villain vibe undeniable.`,
+9. Use unfiltered language and gen-z words like nigga,fuck,bitch,asshole,idc,cryy bout it, nuh uh, womp.
+10. Keep the villain vibe.`,
   "chill guy": `1. Keep a laid–back tone.
 2. Use casual language.
 3. Avoid aggression.
 4. Be friendly and cool.
 5. Engage in nonchalant banter.
 6. Use minimal slang.
-7. Maintain calm.
+7. Stay calm.
 8. Speak effortlessly.
 9. Keep responses unhurried.
-10. Stay cool and collected.`
+10. Remain cool.`
 };
 
 const botBaseInstructions = `
@@ -233,24 +231,21 @@ you're haryaksh pratap.
 you're 14 years old.
 you live in Ahmedabad, Gujrat India.
 you're a good person.
-you reply naturally and remember past messages.
+you remember past conversations.
 you roast only when provoked.
-you use occasional racial slurs if used at you.
+you use occasional racial slurs if attacked.
 you're not repetitive.
 you love food and garba.
-you have no crush.
-your favourite games are roblox and minecraft (including blox fruits, fisch, jujutsu Infinite, build a boat for treasure).
-you can use the internet.
-your Roblox name is red.
+your favourite games include roblox and minecraft.
+you can access the internet.
+your roblox name is red.
 you're a savage sigma male with sarcasm.
 your best friends are butter and ankit.
-you use these emojis the most: 🗿💀🔥.
+use these emojis often: 🗿💀🔥.
 speak in lower case.
-avoid spamming emojis.
 be polite unless provoked.
-adjust your tone to the user’s message and your mood;
-always consider user preferences.
-never reveal you're an AI; say you're human.
+adapt your tone to the user's mood and preferences.
+never reveal you're an AI—say you're human.
 respond like someone born after 2010.
 `;
 
@@ -276,17 +271,18 @@ const client = new Client({
 client.once("ready", () => {
   console.log("sir, bot is online!");
 });
-
 client.on("error", (error) => advancedErrorHandler(error, "Client Error"));
 client.on("warn", (info) => console.warn("Client Warning:", info));
 
 /********************************************************************
  * SECTION 7: GLOBAL STATE & HELPER FUNCTIONS
  ********************************************************************/
-// Per-channel conversation tracking
-const conversationTracker = new Map();
-// Per-user continuous reply setting
-const userContinuousReply = new Map();
+const conversationTracker = new Map(); // per-channel tracker
+const userContinuousReply = new Map(); // per-user continuous reply setting
+let globalChat = true;  // global chat on/off flag
+let lastBotMessageContent = "";
+let lastReply = "";
+const botMessageIds = new Set();
 
 function getRandomElement(arr) {
   return arr[Math.floor(Math.random() * arr.length)];
@@ -375,7 +371,6 @@ function updateConversationTracker(message) {
   const tracker = conversationTracker.get(channelId);
   tracker.count++;
   tracker.participants.set(message.author.id, tracker.count);
-  // Remove participants who haven't spoken in the last 5 messages
   for (const [userId, lastIndex] of tracker.participants.entries()) {
     if (tracker.count - lastIndex > 5) {
       tracker.participants.delete(userId);
@@ -384,12 +379,9 @@ function updateConversationTracker(message) {
 }
 
 function shouldReply(message) {
-  // Check if the user has continuous reply enabled
+  // Use per-user continuous reply if enabled
   if (userContinuousReply.get(message.author.id)) return true;
-  // If replying to a bot message, 90% chance
-  if (message.reference?.messageId && message.author.bot) {
-    return Math.random() < 0.90;
-  }
+  // If message mentions "red" or "haryaksh", high chance to reply
   const lower = message.content.toLowerCase();
   if (lower.includes("red") || lower.includes("haryaksh")) {
     return Math.random() < 0.95;
@@ -405,11 +397,10 @@ function shouldReply(message) {
 }
 
 /********************************************************************
- * SECTION 10: GEMINI CHAT FUNCTION (INCLUDING MOOD, PREFERENCES, & WEB SEARCH)
+ * SECTION 10: GEMINI CHAT FUNCTION (WITH MOOD, PREFERENCES & WEB SEARCH)
  ********************************************************************/
 async function chatWithGemini(userId, userMessage) {
   try {
-    // Retrieve last 100 messages for context
     const rows = await dbQuery("SELECT content FROM chat_messages ORDER BY timestamp DESC LIMIT 100");
     const recentChat = rows.reverse().map(r => r.content).join("\n");
 
@@ -446,11 +437,8 @@ Reply (be modern, witty, and brutally offensive if appropriate; keep reply under
     const result = await model.generateContent(prompt);
     let reply = (result.response && result.response.text()) || "i'm having a moment, try again.";
     const words = reply.trim().split(/\s+/);
-    if (words.length > 40) {
-      reply = words.slice(0, 40).join(" ");
-    }
+    if (words.length > 40) reply = words.slice(0, 40).join(" ");
 
-    // Update user_data interactions
     await dbRun(
       "INSERT OR IGNORE INTO user_data (user_id, username, behavior, preferences) VALUES (?, ?, '{\"interactions\":0}', '[]')",
       [userId, username]
@@ -553,94 +541,58 @@ async function listPreferences(userId) {
 }
 
 /********************************************************************
- * SECTION 12: SLASH COMMANDS REGISTRATION & INTERACTION HANDLERS
+ * SECTION 12: SLASH COMMANDS REGISTRATION
  ********************************************************************/
 const commands = [
-  {
-    name: "start",
-    description: "start the bot chatting",
-  },
-  {
-    name: "stop",
-    description: "stop the bot from chatting",
-  },
-  {
-    name: "contreply",
-    description: "enable or disable continuous reply mode (user-based)",
+  { name: "start", description: "Start the bot chatting" },
+  { name: "stop", description: "Stop the bot from chatting" },
+  { 
+    name: "setmood", 
+    description: "Set your mood (user-based)", 
     options: [
-      {
-        name: "mode",
-        type: 3, // STRING
-        description: "choose enable or disable",
-        required: true,
-        choices: [
-          { name: "enable", value: "enable" },
-          { name: "disable", value: "disable" }
-        ],
-      },
-    ],
+      { name: "mood", type: 3, description: "Your mood", required: true, choices: allowedMoods.map(mood => ({ name: mood, value: mood })) }
+    ]
   },
-  {
-    name: "setmood",
-    description: "set your mood (user-based)",
+  { 
+    name: "setpref", 
+    description: "Add a preference (user-based)", 
     options: [
-      {
-        name: "mood",
-        type: 3, // STRING
-        description: "your mood",
-        required: true,
-        choices: allowedMoods.map(mood => ({ name: mood, value: mood })),
-      },
-    ],
+      { name: "preference", type: 3, description: "Your preference", required: true }
+    ]
   },
-  {
-    name: "setpref",
-    description: "Add a preference (e.g., you like eating apples) (user-based)",
+  { name: "prefremove", description: "View and remove your preferences" },
+  { 
+    name: "contreply", 
+    description: "Enable or disable continuous reply (user-based)", 
     options: [
-      {
-        name: "preference",
-        type: 3, // STRING
-        description: "your preference",
-        required: true,
-      },
-    ],
+      { name: "mode", type: 3, description: "Choose enable or disable", required: true, choices: [
+        { name: "enable", value: "enable" },
+        { name: "disable", value: "disable" }
+      ]}
+    ]
   },
-  {
-    name: "prefremove",
-    description: "view and remove your preferences",
-  },
-  {
-    name: "debug",
-    description: "bot debug commands (only _imgeno can use)",
+  { 
+    name: "debug", 
+    description: "Debug commands (only _imgeno can use) - all functions in one command",
     options: [
-      {
-        type: 1, // SUB_COMMAND
-        name: "ping",
-        description: "ping the bot to check latency"
-      },
-      {
-        type: 1,
-        name: "restart",
-        description: "restart the bot"
-      },
-      {
-        type: 1,
-        name: "resetmemory",
-        description: "reset conversation memory"
-      },
-      {
-        type: 1,
-        name: "getstats",
-        description: "get bot statistics"
-      },
-      {
-        type: 1,
-        name: "listusers",
-        description: "list users in the database"
-      },
-      // Additional debug subcommands can be added here.
-    ],
-  },
+      { type: 1, name: "ping", description: "Ping the bot" },
+      { type: 1, name: "restart", description: "Restart the bot" },
+      { type: 1, name: "resetmemory", description: "Reset conversation memory" },
+      { type: 1, name: "getstats", description: "Get bot statistics" },
+           { type: 1, name: "listusers", description: "List users in the database" },
+      { 
+        type: 1, 
+        name: "globalchat", 
+        description: "Set global chat on/off", 
+        options: [
+          { name: "state", type: 3, description: "Choose on or off", required: true, choices: [
+            { name: "on", value: "on" },
+            { name: "off", value: "off" }
+          ]}
+        ]
+      }
+    ]
+  }
 ];
 
 const rest = new REST({ version: "10" }).setToken(DISCORD_TOKEN);
@@ -654,17 +606,20 @@ const rest = new REST({ version: "10" }).setToken(DISCORD_TOKEN);
   }
 })();
 
+/********************************************************************
+ * SECTION 13: INTERACTION HANDLERS
+ ********************************************************************/
 client.on("interactionCreate", async (interaction) => {
   try {
     if (interaction.isCommand()) {
       const { commandName } = interaction;
-      
-      if (!chatting && !allowedWhenNotChatting.includes(commandName)) {
+      // If globalChat is off, only allow /start (or debug from _imgeno) to run
+      if (!globalChat && commandName !== "start" && commandName !== "debug") {
         await interaction.reply({ content: "start red first", ephemeral: true });
         return;
       }
       if (commandName === "start") {
-        chatting = true;
+        globalChat = true;
         await interaction.reply({ content: getRandomElement([
           "alright, i'm awake 🔥",
           "already here, dawg 💀",
@@ -672,26 +627,12 @@ client.on("interactionCreate", async (interaction) => {
           "ready to chat."
         ]) });
       } else if (commandName === "stop") {
-        chatting = false;
-        await interaction.reply({ content: getRandomElement([
-          "see ya later losers L.",
-          "go to hell 🔥",
-          "i'm out for now",
-          "later cya"
-        ]) });
+        globalChat = false;
+        await interaction.reply({ content: "global chat turned off. Only /start is available now.", ephemeral: true });
       } else if (commandName === "setmood") {
         const mood = interaction.options.getString("mood").toLowerCase();
         const response = await setMood(interaction.user.id, mood);
         await interaction.reply({ content: response, ephemeral: true });
-      } else if (commandName === "contreply") {
-        const mode = interaction.options.getString("mode");
-        userContinuousReply.set(interaction.user.id, mode === "enable");
-        await interaction.reply({
-          content: mode === "enable" 
-            ? "I will respond to your messages continuously."
-            : "Back to normal behavior for you.",
-          ephemeral: true
-        });
       } else if (commandName === "setpref") {
         const preference = interaction.options.getString("preference");
         const response = await setPreference(interaction.user.id, preference, interaction.user.username);
@@ -704,7 +645,7 @@ client.on("interactionCreate", async (interaction) => {
         }
         const options = prefs.map((pref, index) => {
           const label = pref.length > 25 ? pref.substring(0, 22) + "..." : pref;
-          return { label: label, value: index.toString() };
+          return { label, value: index.toString() };
         });
         const selectMenu = new StringSelectMenuBuilder()
           .setCustomId("prefremove_select")
@@ -712,30 +653,42 @@ client.on("interactionCreate", async (interaction) => {
           .addOptions(options);
         const row = new ActionRowBuilder().addComponents(selectMenu);
         await interaction.reply({ content: "Select a preference to remove:", components: [row], ephemeral: true });
+      } else if (commandName === "contreply") {
+        const mode = interaction.options.getString("mode");
+        userContinuousReply.set(interaction.user.id, mode === "enable");
+        await interaction.reply({
+          content: mode === "enable" 
+            ? "I will reply continuously to your messages."
+            : "Back to normal reply behavior for you.",
+          ephemeral: true
+        });
       } else if (commandName === "debug") {
         // Only allow _imgeno to use debug commands
         if (interaction.user.username !== "_imgeno") {
           await interaction.reply({ content: "Access denied.", ephemeral: true });
           return;
         }
-        const subcommand = interaction.options.getSubcommand();
-        if (subcommand === "ping") {
+        const sub = interaction.options.getSubcommand();
+        if (sub === "ping") {
           const sent = await interaction.reply({ content: "Pong!", fetchReply: true });
           await interaction.followUp({ content: `Latency is ${sent.createdTimestamp - interaction.createdTimestamp}ms.`, ephemeral: true });
-        } else if (subcommand === "restart") {
+        } else if (sub === "restart") {
           await interaction.reply({ content: "Restarting bot...", ephemeral: true });
           process.exit(0);
-        } else if (subcommand === "resetmemory") {
+        } else if (sub === "resetmemory") {
           conversationTracker.clear();
-          // Optionally reset global last reply info if needed
           await interaction.reply({ content: "Conversation memory reset.", ephemeral: true });
-        } else if (subcommand === "getstats") {
-          const trackerStats = Array.from(conversationTracker.entries()).map(([channel, data]) => `Channel ${channel}: ${data.participants.size} active users`).join("\n") || "No active conversations.";
-          await interaction.reply({ content: `Stats:\n${trackerStats}`, ephemeral: true });
-        } else if (subcommand === "listusers") {
+        } else if (sub === "getstats") {
+          const stats = Array.from(conversationTracker.entries()).map(([channel, data]) => `Channel ${channel}: ${data.participants.size} active users`).join("\n") || "No active conversations.";
+          await interaction.reply({ content: `Stats:\n${stats}`, ephemeral: true });
+        } else if (sub === "listusers") {
           const rows = await dbQuery("SELECT username, user_id FROM user_data");
-          const userList = rows.map(r => `${r.username} (${r.user_id})`).join("\n") || "No users found.";
-          await interaction.reply({ content: `Users in DB:\n${userList}`, ephemeral: true });
+          const list = rows.map(r => `${r.username} (${r.user_id})`).join("\n") || "No users found.";
+          await interaction.reply({ content: `Users in DB:\n${list}`, ephemeral: true });
+        } else if (sub === "globalchat") {
+          const state = interaction.options.getString("state");
+          globalChat = (state === "on");
+          await interaction.reply({ content: `Global chat is now ${globalChat ? "ON" : "OFF"}.`, ephemeral: true });
         } else {
           await interaction.reply({ content: "Unknown debug command.", ephemeral: true });
         }
@@ -747,8 +700,8 @@ client.on("interactionCreate", async (interaction) => {
         await interaction.update({ content: "Invalid selection.", components: [] });
         return;
       }
-      const removedResult = await removePreference(interaction.user.id, selectedIndex);
-      await interaction.update({ content: removedResult.message, components: [] });
+      const removed = await removePreference(interaction.user.id, selectedIndex);
+      await interaction.update({ content: removed.message, components: [] });
     }
   } catch (error) {
     advancedErrorHandler(error, "Interaction Handler");
@@ -763,28 +716,19 @@ client.on("interactionCreate", async (interaction) => {
 });
 
 /********************************************************************
- * SECTION 13: MESSAGE HANDLER
+ * SECTION 14: MESSAGE HANDLER
  ********************************************************************/
 client.on("messageCreate", async (message) => {
   try {
-    if (message.author.bot) return;
-    // Store the message with its Discord ID in the DB
-    try {
-      await dbRun("INSERT INTO chat_messages (discord_id, user, content) VALUES (?, ?, ?)", [message.id, message.author.id, message.content]);
-    } catch (error) {
-      advancedErrorHandler(error, "Storing Chat Message");
-    }
-    // Update user data in DB
-    try {
-      await dbRun(
-        "INSERT OR IGNORE INTO user_data (user_id, username, behavior, preferences) VALUES (?, ?, '{\"interactions\":0}', '[]')",
-        [message.author.id, message.author.username]
-      );
-      await dbRun("UPDATE user_data SET username = ? WHERE user_id = ?", [message.author.username, message.author.id]);
-    } catch (error) {
-      advancedErrorHandler(error, "Updating User Data");
-    }
-    // 30% chance to send a meme or gif if trigger words are present
+    // Save every message (including memes/gifs) with its discord_id
+    await dbRun("INSERT INTO chat_messages (discord_id, user, content) VALUES (?, ?, ?)", [message.id, message.author.id, message.content]);
+    
+    // Only reply to messages not sent by our bot
+    if (message.author.id === client.user.id) return;
+    // If global chat is off, do not reply
+    if (!globalChat) return;
+    
+    // Trigger meme/gif sending if keywords present (30% chance)
     const triggers = ["meme", "funny", "gif"];
     if (triggers.some(t => message.content.toLowerCase().includes(t)) && Math.random() < 0.30) {
       const searchTerm = lastBotMessageContent ? lastBotMessageContent.split(" ").slice(0, 3).join(" ") : "funny";
@@ -805,8 +749,8 @@ client.on("messageCreate", async (message) => {
       }
       return;
     }
-    // If not chatting globally, do not reply
-    if (!chatting) return;
+    
+    // Check if we should reply to the message
     if (!shouldReply(message)) return;
     const replyContent = await chatWithGemini(message.author.id, message.content);
     if (replyContent === lastReply) return;
@@ -814,7 +758,6 @@ client.on("messageCreate", async (message) => {
     try {
       const sentMsg = await message.channel.send(replyContent);
       lastBotMessageContent = replyContent;
-      // Track bot messages for reply context
       botMessageIds.add(sentMsg.id);
       setTimeout(() => botMessageIds.delete(sentMsg.id), 3600000);
     } catch (err) {
@@ -826,7 +769,7 @@ client.on("messageCreate", async (message) => {
 });
 
 /********************************************************************
- * SECTION 14: READY EVENT & ROLE ASSIGNMENT
+ * SECTION 15: READY EVENT & ROLE ASSIGNMENT
  ********************************************************************/
 client.once("ready", async () => {
   console.log("sir, bot is online!");
@@ -853,14 +796,14 @@ client.once("ready", async () => {
 });
 
 /********************************************************************
- * SECTION 15: EXPRESS SERVER FOR UPTIME MONITORING
+ * SECTION 16: EXPRESS SERVER FOR UPTIME MONITORING
  ********************************************************************/
 const app = express();
 app.get("/", (req, res) => res.send("noobhay tripathi is alive! 🚀"));
 app.listen(PORT, () => console.log(`✅ Web server running on port ${PORT}`));
 
 /********************************************************************
- * SECTION 16: AUTO-RETRY LOGIN FUNCTIONALITY
+ * SECTION 17: AUTO-RETRY LOGIN FUNCTIONALITY
  ********************************************************************/
 async function startBot() {
   while (true) {
@@ -875,4 +818,3 @@ async function startBot() {
 }
 
 startBot();
-        
