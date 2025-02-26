@@ -1,6 +1,6 @@
 {
   "name": "red",
-  "version": "1.8.7",
+  "version": "1.8.8",
   "description": "superior walmart bag 🗿.",
   "main": "bot.js",
   "type": "module",
@@ -20,5 +20,5 @@
     "node": ">=18.0.0"
   },
   "author": "Geno aka ankit",
-  "license": "MIT"
+  "license": "take permission first"
 }
